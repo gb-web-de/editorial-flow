@@ -13,6 +13,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@typo3/core/ajax/ajax-request.js': `${doubles}/ajax-request.js`,
+      '@typo3/backend/action-button/immediate-action.js': `${doubles}/immediate-action.js`,
       '@typo3/backend/notification.js': `${doubles}/notification.js`,
       '@typo3/backend/modal.js': `${doubles}/modal.js`,
       '@typo3/backend/enum/severity.js': `${doubles}/severity.js`,

@@ -9,6 +9,8 @@ import AjaxRequest from '@typo3/core/ajax/ajax-request.js';
 import Notification from '@typo3/backend/notification.js';
 import { SeverityEnum } from '@typo3/backend/enum/severity.js';
 import { confirmModal } from '@gb-web/editorial-flow/modal-confirm.js';
+import { notifyRefusal } from '@gb-web/editorial-flow/task/refusal.js';
+import { openCloseDialog } from '@gb-web/editorial-flow/task/close.js';
 
 export function registerPublishButtons(board) {
   const canPublish = TYPO3.settings.EditorialFlow?.canPublish === true;
@@ -47,7 +49,14 @@ export function registerPublishButtons(board) {
         return;
       }
       if (result.success !== true) {
-        Notification.error('Editorial Flow', result.message || 'Could not publish that task.');
+        // A publish refused with `no-pending-versions` is the classic dead end:
+        // nothing to publish, no column that accepts the card, and until closing
+        // existed nothing to suggest. notifyRefusal renders the server's offer.
+        notifyRefusal(result, 'Could not publish that task.', {
+          board,
+          openCloseDialog,
+          taskTitle,
+        });
         return;
       }
       board?.announce(taskTitle + ' published.');

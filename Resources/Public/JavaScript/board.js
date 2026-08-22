@@ -35,6 +35,8 @@ import { registerPublishButtons } from '@gb-web/editorial-flow/task/publish.js';
 import { registerMemberActions } from '@gb-web/editorial-flow/task/member-actions.js';
 import { registerMembershipActions } from '@gb-web/editorial-flow/task/membership.js';
 import { registerConflictDiffButtons } from '@gb-web/editorial-flow/task/conflict-diff.js';
+import { registerCloseActions, openCloseDialog } from '@gb-web/editorial-flow/task/close.js';
+import { notifyRefusal } from '@gb-web/editorial-flow/task/refusal.js';
 import { registerChecklistManagement, registerChecklistManageActions, registerChecklistToggle } from '@gb-web/editorial-flow/board/checklist.js';
 
 /*
@@ -76,6 +78,9 @@ class EditorialFlowBoard {
     registerConflictDiffButtons();
     registerChecklistToggle();
     registerChecklistManageActions();
+    // Closing has to be reachable wherever a task is: the board card, the
+    // ticket modal, and the page module banner.
+    registerCloseActions(this);
 
     this.board = document.querySelector('.editorialflow-board');
     if (this.board === null) {
@@ -272,7 +277,14 @@ class EditorialFlowBoard {
         stageUid: targetStageUid,
       });
       if (result.success !== true) {
-        Notification.error('Editorial Flow', result.message || 'Could not move the task.');
+        // Through notifyRefusal, so a refusal that names a way out - a task
+        // with nothing pending can still be closed - arrives as an offer rather
+        // than as a dead end.
+        notifyRefusal(result, 'Could not move the task.', {
+          board: this,
+          openCloseDialog,
+          taskTitle: cardTitle,
+        });
         return;
       }
 
@@ -494,7 +506,11 @@ class EditorialFlowBoard {
                   deactivateActiveTask: dialogValues.deactivateActiveTask,
                 });
                 if (result.success !== true) {
-                  Notification.error('Editorial Flow', result.message || 'Could not move the task to that stage.');
+                  notifyRefusal(result, 'Could not move the task to that stage.', {
+                    board: this,
+                    openCloseDialog,
+                    taskTitle: cardTitle,
+                  });
                   return;
                 }
 

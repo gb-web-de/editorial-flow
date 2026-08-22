@@ -270,6 +270,23 @@
                                     </f:if>
 
                                     <div class="editorialflow-card-actions">
+                                        <f:comment>
+                                            Rendered for every open card, including foreign-workspace
+                                            ones. Closing is the one action that must always be
+                                            available - a task that cannot be closed cannot be got rid
+                                            of at all, which is the state this button exists to end.
+                                            The dialog itself decides what the editor may then choose;
+                                            discarding is greyed out with a reason where it is not
+                                            possible from here.
+                                        </f:comment>
+                                        <f:if condition="!{card.closed}">
+                                            <button type="button" class="btn btn-xs btn-default editorialflow-action-close"
+                                                    data-editorialflow-close="{card.uid}" data-task-title="{card.title}"
+                                                    title="{f:translate(key: 'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:close.trigger.title', default: 'Close this task')}">
+                                                <core:icon identifier="actions-check" size="small" />
+                                                <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:close.trigger" default="Close" />
+                                            </button>
+                                        </f:if>
                                         <f:if condition="{card.subject_uid} > 0 && !{card.foreignWorkspace}">
                                             <f:then>
                                                 <f:if condition="{card.isActive}">

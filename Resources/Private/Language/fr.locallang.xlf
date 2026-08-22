@@ -711,6 +711,86 @@
                 <source>Editorial Flow</source>
                 <target>Editorial Flow</target>
             </trans-unit>
+            <trans-unit id="close.trigger" xml:space="preserve">
+                <source>Close</source>
+                <target>Clore</target>
+            </trans-unit>
+            <trans-unit id="close.trigger.title" xml:space="preserve">
+                <source>Close this task</source>
+                <target>Clore cette tâche</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.title" xml:space="preserve">
+                <source>Close "%s"?</source>
+                <target>Clore « %s » ?</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.nothingPending" xml:space="preserve">
+                <source>This task has nothing pending. Closing it moves it to Done.</source>
+                <target>Cette tâche n'a plus rien en attente. La clore la déplace vers « Terminé ».</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.pendingIntro" xml:space="preserve">
+                <source>%s still has unpublished changes in workspace "%s":</source>
+                <target>%s a encore des modifications non publiées dans l'espace de travail « %s » :</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.moreChanges" xml:space="preserve">
+                <source>and %s more</source>
+                <target>et %s de plus</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.legend" xml:space="preserve">
+                <source>What should happen to these changes?</source>
+                <target>Que faire de ces modifications ?</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.keep" xml:space="preserve">
+                <source>Close the task and leave these changes pending</source>
+                <target>Clore la tâche et laisser ces modifications en attente</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.keepHint" xml:space="preserve">
+                <source>They stay in the workspace and remain reachable from the Workspaces module.</source>
+                <target>Elles restent dans l'espace de travail et accessibles depuis le module Espaces de travail.</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.handover" xml:space="preserve">
+                <source>Hand these records to another task first</source>
+                <target>Confier d'abord ces enregistrements à une autre tâche</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.handoverNone" xml:space="preserve">
+                <source>No other open task on this page to hand them to.</source>
+                <target>Aucune autre tâche ouverte sur cette page à qui les confier.</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.discard" xml:space="preserve">
+                <source>Discard these changes and close</source>
+                <target>Supprimer ces modifications et clore</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.discardWarning" xml:space="preserve">
+                <source>This throws the unpublished work away. It cannot be undone.</source>
+                <target>Le travail non publié sera perdu. Cette action est irréversible.</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.confirm" xml:space="preserve">
+                <source>Close task</source>
+                <target>Clore la tâche</target>
+            </trans-unit>
+            <trans-unit id="close.dialog.cancel" xml:space="preserve">
+                <source>Cancel</source>
+                <target>Annuler</target>
+            </trans-unit>
+            <trans-unit id="close.success" xml:space="preserve">
+                <source>%s closed.</source>
+                <target>%s close.</target>
+            </trans-unit>
+            <trans-unit id="close.success.discarded" xml:space="preserve">
+                <source>%s closed, %s change(s) discarded.</source>
+                <target>%s close, %s modification(s) supprimée(s).</target>
+            </trans-unit>
+            <trans-unit id="close.error.failed" xml:space="preserve">
+                <source>Could not close that task.</source>
+                <target>Impossible de clore cette tâche.</target>
+            </trans-unit>
+            <trans-unit id="close.error.server" xml:space="preserve">
+                <source>Server error while closing the task.</source>
+                <target>Erreur serveur lors de la clôture de la tâche.</target>
+            </trans-unit>
+            <trans-unit id="close.error.preview" xml:space="preserve">
+                <source>Could not read what this task still has pending.</source>
+                <target>Impossible de lire ce que cette tâche a encore en attente.</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

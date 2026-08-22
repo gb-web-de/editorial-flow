@@ -596,6 +596,66 @@
             <trans-unit id="widget.group.editorialFlow" xml:space="preserve">
                 <source>Editorial Flow</source>
             </trans-unit>
+            <trans-unit id="close.trigger" xml:space="preserve">
+                <source>Close</source>
+            </trans-unit>
+            <trans-unit id="close.trigger.title" xml:space="preserve">
+                <source>Close this task</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.title" xml:space="preserve">
+                <source>Close "%s"?</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.nothingPending" xml:space="preserve">
+                <source>This task has nothing pending. Closing it moves it to Done.</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.pendingIntro" xml:space="preserve">
+                <source>%s still has unpublished changes in workspace "%s":</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.moreChanges" xml:space="preserve">
+                <source>and %s more</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.legend" xml:space="preserve">
+                <source>What should happen to these changes?</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.keep" xml:space="preserve">
+                <source>Close the task and leave these changes pending</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.keepHint" xml:space="preserve">
+                <source>They stay in the workspace and remain reachable from the Workspaces module.</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.handover" xml:space="preserve">
+                <source>Hand these records to another task first</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.handoverNone" xml:space="preserve">
+                <source>No other open task on this page to hand them to.</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.discard" xml:space="preserve">
+                <source>Discard these changes and close</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.discardWarning" xml:space="preserve">
+                <source>This throws the unpublished work away. It cannot be undone.</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.confirm" xml:space="preserve">
+                <source>Close task</source>
+            </trans-unit>
+            <trans-unit id="close.dialog.cancel" xml:space="preserve">
+                <source>Cancel</source>
+            </trans-unit>
+            <trans-unit id="close.success" xml:space="preserve">
+                <source>%s closed.</source>
+            </trans-unit>
+            <trans-unit id="close.success.discarded" xml:space="preserve">
+                <source>%s closed, %s change(s) discarded.</source>
+            </trans-unit>
+            <trans-unit id="close.error.failed" xml:space="preserve">
+                <source>Could not close that task.</source>
+            </trans-unit>
+            <trans-unit id="close.error.server" xml:space="preserve">
+                <source>Server error while closing the task.</source>
+            </trans-unit>
+            <trans-unit id="close.error.preview" xml:space="preserve">
+                <source>Could not read what this task still has pending.</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

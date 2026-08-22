@@ -28,13 +28,32 @@ export function press(name) {
   }
 
   if (typeof button.trigger === 'function') {
-    return button.trigger(new Event('click'), modal.instance)
+    // A real button as the event target, because core passes the click event
+    // from the button the editor pressed and handlers disable it against double
+    // submission - `new Event('click')` has a null target and blows up there.
+    const element = document.createElement('button')
+    element.name = name
+    element.textContent = button.text ?? name
+    const event = new Event('click')
+    Object.defineProperty(event, 'target', { value: element })
+
+    return button.trigger(event, modal.instance)
   }
   modal.instance.dispatchEvent(new Event('confirm.button.' + name))
 }
 
-function buildInstance() {
-  const instance = new EventTarget()
+/*
+ * A real element, not a bare EventTarget: core's modal IS one, and callers use
+ * it as one - reading `dataset` to guard against double submission and calling
+ * `querySelector` to read their own form back out. The content node is appended
+ * so those queries find what the caller put there.
+ */
+function buildInstance(content) {
+  const instance = document.createElement('div')
+  instance.classList.add('typo3-modal-double')
+  if (content instanceof Node) {
+    instance.appendChild(content)
+  }
   instance.hidden = false
   instance.hideModal = () => {
     instance.hidden = true
@@ -44,8 +63,16 @@ function buildInstance() {
 }
 
 export default {
+  /*
+   * Copied verbatim from core's own enums (cms-backend Modal): callers pass
+   * Modal.types.default and Modal.sizes.large, and a double without them fails
+   * with "cannot read properties of undefined" rather than anything readable.
+   */
+  types: { default: 'default', template: 'template', ajax: 'ajax', iframe: 'iframe' },
+  sizes: { small: 'small', default: 'default', medium: 'medium', large: 'large', full: 'full' },
+
   advanced(configuration) {
-    const instance = buildInstance()
+    const instance = buildInstance(configuration.content)
     opened.push({ ...configuration, instance })
 
     return instance

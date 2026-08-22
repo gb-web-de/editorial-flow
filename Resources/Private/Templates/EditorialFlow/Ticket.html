@@ -27,6 +27,13 @@
             <a href="{editUrl}" class="btn btn-default btn-sm">
                 <core:icon identifier="actions-open" size="small" /> Edit record
             </a>
+            <f:if condition="!{task.closed}">
+                <button type="button" class="btn btn-default btn-sm editorialflow-action-close"
+                        data-editorialflow-close="{task.uid}" data-task-title="{task.title}">
+                    <core:icon identifier="actions-check" size="small" />
+                    <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:close.trigger" default="Close" />
+                </button>
+            </f:if>
         </div>
     </header>
 

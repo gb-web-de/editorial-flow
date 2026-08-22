@@ -1332,3 +1332,69 @@
 .editorialflow-widget-row--attention strong {
     color: var(--typo3-state-warning-color, #b35c00);
 }
+
+/*
+ * The close dialog.
+ *
+ * A radio group rather than three buttons: picking is separate from confirming,
+ * so a mis-click cannot discard unpublished work on its own.
+ */
+.editorialflow-close-pending {
+    margin: 0 0 1rem;
+    padding-left: 1.25rem;
+}
+
+.editorialflow-close-pending li + li {
+    margin-top: 0.25rem;
+}
+
+.editorialflow-close-changes {
+    color: var(--typo3-text-color-variant, #6b7280);
+}
+
+.editorialflow-close-choices {
+    border: 0;
+    margin: 0;
+    padding: 0;
+}
+
+.editorialflow-close-choices legend {
+    font-size: 0.875rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.editorialflow-close-choice + .editorialflow-close-choice {
+    margin-top: 0.75rem;
+}
+
+.editorialflow-close-choice select {
+    margin-left: 1.75rem;
+    margin-top: 0.375rem;
+    max-width: 22rem;
+}
+
+.editorialflow-close-hint {
+    color: var(--typo3-text-color-variant, #6b7280);
+    font-size: 0.8125rem;
+    margin: 0.125rem 0 0 1.75rem;
+}
+
+/*
+ * The destructive choice is marked by its wording first - the label says
+ * "Discard" and the hint says it cannot be undone. The colour only reinforces
+ * what the text already carries.
+ */
+.editorialflow-close-choice--danger .form-check-label {
+    color: var(--typo3-state-danger-color, #b3261e);
+    font-weight: 600;
+}
+
+.editorialflow-close-choice--danger .editorialflow-close-hint {
+    color: var(--typo3-state-danger-color, #b3261e);
+}
+
+.editorialflow-close-choice input:disabled ~ .form-check-label,
+.editorialflow-close-choice input:disabled ~ .editorialflow-close-hint {
+    opacity: 0.6;
+}
