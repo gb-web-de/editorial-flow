@@ -103,7 +103,7 @@ This keeps the "unplanned work is never lost" guarantee while still giving the e
 say. `auto_created` is what lets the board distinguish "somebody planned this" from "this
 appeared because someone started typing" even after the follow-up wizard refined the task.
 
-## The four moments
+## The five moments
 
 **1. Somebody plans work.** A task is created for a subject and lands in Backlog, taking the
 page's content along with it. Assigning a `be_user` moves it to Planned. Editors may assign
@@ -124,9 +124,36 @@ exactly as they do in the Workspaces module. Editorial Flow mirrors the resultin
 `t3ver_stage` onto the task as a read cache for sorting; core stays the source of truth.
 
 **4. It goes live.** `CloseTaskAfterPublishListener` closes the task on
-`AfterRecordPublishedEvent` — but only once **nothing the task covers is still pending**. The
-event fires per record, and a task covers a page and all its content, so closing on the first
-published element would archive a task with half its content still in review.
+`AfterRecordPublishedEvent` — but only once **nothing the task covers is still pending**, and
+only when the publish came from **the task's own workspace**. The event fires per record, and
+a task covers a page and all its content, so closing on the first published element would
+archive a task with half its content still in review. Core also allows the same live record to
+be versioned in several workspaces at once, so a publish out of one of the others says nothing
+about whether this task is finished.
+
+**5. Somebody stops.** Not every task ends by going live. A draft gets discarded, the change
+turns out to be unnecessary, the record is published from somewhere else, or the work is
+simply abandoned — and none of those produce a publish event. So closing is also an explicit
+action an editor can take on **any** task, in any state, from the card or the ticket
+(`TaskAjaxController::closeTaskAction()`).
+
+Its precondition chain is almost empty on purpose. Every check that can refuse a close
+recreates the trap the action exists to remove: before it, a task whose version had been
+discarded could not change stage (`no-pending-versions`), could not return to a planning column
+(`cannot-return-versioned-task-to-planning`), could not be dropped into Done (that column takes
+no drops by design) and could not be published — three correct refusals adding up to a card
+nobody could get rid of.
+
+What happens to versions that are still pending is a separate, deliberate choice, made in the
+dialog and never by default: keep them (they stay in the workspace, reachable from the
+Workspaces module), hand the records to another task first — which is `attach`, and has to run
+*before* the close, since `close()` marks the member rows closed and `moveMemberToTask()` only
+moves open ones — or discard them, which is irreversible and says so.
+
+**Refusals name the way out.** A rejection may carry a `TaskActionResolution`: a stable action
+identifier plus an editor-facing label, rendered as a link on the notification. This does not
+soften the rule that was applied — the stage gate still refuses — it stands beside it. The
+four refusals that were dead ends now all offer "close this task instead".
 
 ## Where the history lives
 
@@ -360,6 +387,26 @@ binding for every board feature:
   with a confirmation, never something an editor can do by dropping a card slightly off target.
 - Target: **WCAG 2.2 AA**, verified with keyboard-only and screen-reader passes before any
   release.
+
+### Which of those actually hold today
+
+The list above is the commitment. Two of its entries are not met yet, and saying so here is
+worth more than letting the claim stand:
+
+- **"Nothing is drag-only" is not true of a column move.** Every *action* on a card is
+  keyboard-reachable — working on a task, publishing, assigning, comparing versions, and now
+  closing (`Tests/Playwright/close-task.spec.ts` proves that one end to end from the keyboard
+  alone). But changing a card's state or stage is still drag-and-drop only: there is no menu on
+  the card and no key command for it, so `board.js`'s keyboard surface is selection and nothing
+  else. This is the single most common Kanban accessibility failure and it is currently ours.
+- **"Focus is never lost" is not true after a mutation.** Every successful action ends in
+  `window.location.reload()`, which returns focus to `<body>`. Reaching the stated behaviour
+  means the board updating in place instead of reloading, which is a larger change than any one
+  action.
+
+The rest hold: the live region is used by every path that changes something, status is always
+icon-and-label or word-and-colour rather than colour alone, `prefers-reduced-motion` is
+honoured, and publishing and closing are explicit confirmed actions rather than drop targets.
 
 ## Carried over from the kanban-workspaces review (2026-08-07)
 

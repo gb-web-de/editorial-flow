@@ -51,6 +51,20 @@ const EDITING_STAGE_UID = 0;
  */
 const PENDING_PAGE_RECORD = 'pages:0';
 
+/**
+ * Does this node belong to a control of its own?
+ *
+ * The card is both a selectable option and a container of buttons, which is the
+ * composite pattern a Kanban board needs and the one ARIA's `option` role does
+ * not really allow. Until the card model is reworked, the least it must do is
+ * keep its hands off events that started in something the browser already knows
+ * how to activate.
+ */
+function isInteractive(node) {
+  return node instanceof Element
+    && node.closest('button, a[href], input, select, textarea, summary, [tabindex]:not(.editorialflow-card)') !== null;
+}
+
 class EditorialFlowBoard {
   constructor() {
     this.selection = new Set();
@@ -106,12 +120,28 @@ class EditorialFlowBoard {
 
   registerCardEvents() {
     this.board.querySelectorAll('.editorialflow-card').forEach((card) => {
-      card.addEventListener('click', () => this.toggleSelection(card));
-      card.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          this.toggleSelection(card);
+      card.addEventListener('click', (event) => {
+        if (isInteractive(event.target)) {
+          return;
         }
+        this.toggleSelection(card);
+      });
+      card.addEventListener('keydown', (event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') {
+          return;
+        }
+        // A keydown on a button inside the card bubbles up to here, and the
+        // preventDefault() below cancels the browser's own "Enter activates a
+        // button" behaviour before it can produce a click. Every action on a
+        // card - Publish, Assign me, Work on this task, Close - was therefore
+        // dead to the keyboard while perfectly usable with a mouse. Found by
+        // Tests/Playwright/close-task.spec.ts, which is what a keyboard-only
+        // test is for.
+        if (isInteractive(event.target)) {
+          return;
+        }
+        event.preventDefault();
+        this.toggleSelection(card);
       });
     });
   }
