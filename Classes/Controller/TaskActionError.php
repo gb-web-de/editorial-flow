@@ -23,11 +23,16 @@ final readonly class TaskActionError
      * @param array<string, mixed> $context extra fields for the log entry only -
      *        never shown to the editor, so this is where record IDs, table names
      *        etc. belong instead of being folded into the message text.
+     * @param TaskActionResolution|null $resolution one concrete way out, where
+     *        there is one. Optional because most refusals are self-explanatory:
+     *        an offer on every rejection would be noise, and the ones that need
+     *        it are the ones that would otherwise be dead ends.
      */
     public function __construct(
         public string $code,
         public string $message,
         public array $context = [],
+        public ?TaskActionResolution $resolution = null,
     ) {
     }
 }

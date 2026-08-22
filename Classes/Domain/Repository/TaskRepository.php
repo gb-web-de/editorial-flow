@@ -737,9 +737,24 @@ final class TaskRepository
      *
      * For core stage columns this is only a read cache: TYPO3 has already written
      * t3ver_stage, and this keeps the board sortable without touching every version.
+     *
+     * DONE is refused outright. It is the one state that carries a second fact -
+     * `closed` - and close() is the only thing that writes both together.
+     * Reaching Done through here produces a task that looks finished on the
+     * board and is still open in the database, which is how a task ended up in
+     * the Done column while remaining fully writable. Unreachable from
+     * legitimate callers (fromStageId() never returns DONE), and that is the
+     * point of asserting it rather than trusting it.
      */
     public function moveToColumn(int $taskUid, string $state, int $stageUid): void
     {
+        if ($state === TaskState::DONE->value) {
+            throw new \InvalidArgumentException(
+                'A task reaches Done by being closed, not by being moved. Use close().',
+                1787654321,
+            );
+        }
+
         $this->connectionPool->getConnectionForTable(self::TABLE)->update(
             self::TABLE,
             [

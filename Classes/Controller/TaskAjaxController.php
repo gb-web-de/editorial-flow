@@ -761,6 +761,24 @@ final class TaskAjaxController
             }
         }
 
+        // Done is produced by closing, never by a column move.
+        //
+        // TaskState::DONE->hasVersion() is false, which groups it with
+        // Backlog/Planned as one of Editorial Flow's own states - so without
+        // this guard the branch below writes state = done through
+        // moveToColumn(), which does not set `closed`. The result is a task
+        // sitting in the Done column while still fully open and writable. The
+        // board cannot produce that (the Done column takes no drops), but any
+        // POST to this route can, and did.
+        if ($state === TaskState::DONE) {
+            return $this->reject(
+                'close-task-instead-of-done',
+                'Finishing a task is an explicit action, not a column move - close it instead.',
+                ['taskUid' => $taskUid],
+                $this->offerToClose($taskUid),
+            );
+        }
+
         // Skipped for a ticket that still has no page: there is no record to
         // hold a permission on, and the move about to happen writes none.
         if (!$isPendingSubject) {
@@ -787,6 +805,7 @@ final class TaskAjaxController
                 'cannot-return-versioned-task-to-planning',
                 'This task already has a workspace version, so it cannot be moved back to a planning column.',
                 ['taskUid' => $taskUid, 'workspaceUid' => (int)$task['workspace_uid']],
+                $this->offerToClose($taskUid),
             );
         }
 
@@ -1369,6 +1388,7 @@ final class TaskAjaxController
                 'no-pending-versions',
                 'There is nothing pending on this task to move to another stage.',
                 ['taskUid' => $taskUid, 'workspaceUid' => $workspaceUid],
+                $this->offerToClose($taskUid),
             );
         }
 
@@ -1568,6 +1588,7 @@ final class TaskAjaxController
             'no-pending-versions',
             'There is nothing pending on this task to publish.',
             ['taskUid' => $taskUid, 'workspaceUid' => $workspaceUid],
+            $this->offerToClose($taskUid),
         );
     }
 
@@ -2320,16 +2341,30 @@ final class TaskAjaxController
      * and attachAction()'s per-record loop, where a failure does not abort the
      * whole request but must still be both logged and reported per record.
      *
-     * @return array{code: string, message: string}
+     * A resolution, where one was offered, is added to both halves. The client
+     * needs it to render the way out; the log needs it so that "the editor was
+     * stuck here" and "the editor was shown a way out" are told apart when
+     * someone reads back why a task sat untouched for a week.
+     *
+     * @return array{code: string, message: string, resolution?: array<string, mixed>}
      */
     private function logAndExposeError(TaskActionError $error): array
     {
+        $resolution = $error->resolution?->toArray();
+
         $this->logger->notice($error->code, $error->context + [
             'message' => $error->message,
+            'resolution' => $resolution === null ? null : $resolution['action'],
             'beUser' => (int)($this->getBackendUser()->user['uid'] ?? 0),
         ]);
 
-        return ['code' => $error->code, 'message' => $error->message];
+        $exposed = ['code' => $error->code, 'message' => $error->message];
+
+        // Absent rather than null when there is no offer: TaskAjaxControllerErrorsTest
+        // pins the {success, code, message} shape, and a key that is always
+        // present would make "has an offer" a value check instead of a key check
+        // for every client.
+        return $resolution === null ? $exposed : $exposed + ['resolution' => $resolution];
     }
 
     /**
@@ -2339,9 +2374,30 @@ final class TaskAjaxController
      *
      * @param array<string, mixed> $context
      */
-    private function reject(string $code, string $message, array $context = []): ResponseInterface
+    private function reject(
+        string $code,
+        string $message,
+        array $context = [],
+        ?TaskActionResolution $resolution = null,
+    ): ResponseInterface {
+        return $this->error(new TaskActionError($code, $message, $context, $resolution));
+    }
+
+    /**
+     * "Close this task instead" - the offer behind every refusal that would
+     * otherwise be a dead end.
+     *
+     * A task with nothing pending is refused by the stage gate, by the planning
+     * columns and by publish, all correctly. Closing is the one thing that does
+     * work, and before it existed there was nothing to point at.
+     */
+    private function offerToClose(int $taskUid): TaskActionResolution
     {
-        return $this->error(new TaskActionError($code, $message, $context));
+        return new TaskActionResolution(
+            'close-task',
+            'Close this task instead',
+            ['taskUid' => $taskUid],
+        );
     }
 
     /**

@@ -253,6 +253,134 @@ final class TaskAjaxControllerErrorsTest extends FunctionalTestCase
     }
 
     /**
+     * A refusal that leaves the editor nowhere to go has to name the way out.
+     *
+     * The gate itself is unchanged and still refuses - the offer sits beside it.
+     * That distinction is the whole design: softening the stage rule would let
+     * a task move without pending work, which is a different bug.
+     */
+    #[Test]
+    public function aStageMoveWithNothingPendingOffersToCloseTheTaskInstead(): void
+    {
+        $taskUid = $this->createOpenTask(['state' => 'in_progress']);
+
+        $response = $this->subject()->executeStageAction($this->jsonRequest([
+            'task' => $taskUid,
+            'stageUid' => 1,
+        ]));
+        $payload = $this->decode($response);
+
+        self::assertSame(400, $response->getStatusCode(), 'still a refusal, not a softened rule');
+        self::assertFalse($payload['success']);
+        self::assertSame('no-pending-versions', $payload['code']);
+        self::assertSame('close-task', $payload['resolution']['action']);
+        self::assertSame($taskUid, $payload['resolution']['taskUid']);
+        self::assertNotSame('', $payload['resolution']['label']);
+    }
+
+    #[Test]
+    public function returningAVersionedTaskToPlanningOffersToCloseItInstead(): void
+    {
+        $taskUid = $this->createOpenTask(['state' => 'in_progress']);
+
+        $response = $this->subject()->moveStageAction($this->jsonRequest([
+            'task' => $taskUid,
+            'state' => 'backlog',
+        ]));
+        $payload = $this->decode($response);
+
+        self::assertSame('cannot-return-versioned-task-to-planning', $payload['code']);
+        self::assertSame('close-task', $payload['resolution']['action']);
+        self::assertSame($taskUid, $payload['resolution']['taskUid']);
+    }
+
+    #[Test]
+    public function publishingWithNothingPendingOffersToCloseTheTaskInstead(): void
+    {
+        $taskUid = $this->createOpenTask(['state' => 'in_progress']);
+
+        $response = $this->subject()->publishTaskAction($this->jsonRequest(['task' => $taskUid]));
+        $payload = $this->decode($response);
+
+        self::assertSame('no-pending-versions', $payload['code']);
+        self::assertSame('close-task', $payload['resolution']['action']);
+    }
+
+    /**
+     * TaskState::DONE->hasVersion() is false, so a Done move used to fall
+     * through to moveToColumn(), which writes `state` but not `closed` - a task
+     * that looks finished on the board and is still open in the database.
+     */
+    #[Test]
+    public function movingATaskToDoneIsRefusedAndLeavesTheRowAlone(): void
+    {
+        $taskUid = $this->createOpenTask(['workspace_uid' => 0]);
+
+        $response = $this->subject()->moveStageAction($this->jsonRequest([
+            'task' => $taskUid,
+            'state' => 'done',
+        ]));
+        $payload = $this->decode($response);
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('close-task-instead-of-done', $payload['code']);
+        self::assertSame('close-task', $payload['resolution']['action']);
+
+        $row = $this->taskRow($taskUid);
+        self::assertSame('backlog', (string)$row['state'], 'the column was not written');
+        self::assertSame(0, (int)$row['closed'], 'and neither was closed');
+    }
+
+    /**
+     * The offer is additive. A rejection that has no way out must not grow a
+     * `resolution` key, or every client would have to inspect its value instead
+     * of its presence.
+     */
+    #[Test]
+    public function aRefusalWithoutAWayOutCarriesNoResolutionKey(): void
+    {
+        $response = $this->subject()->closeTaskAction($this->jsonRequest(['task' => 4711]));
+        $payload = $this->decode($response);
+
+        self::assertSame('task-not-found', $payload['code']);
+        self::assertArrayNotHasKey('resolution', $payload);
+    }
+
+    #[Test]
+    public function theOfferIsRecordedInTheDeveloperLogToo(): void
+    {
+        $taskUid = $this->createOpenTask(['state' => 'in_progress']);
+
+        $this->subject()->publishTaskAction($this->jsonRequest(['task' => $taskUid]));
+
+        $records = array_values(array_filter(
+            $this->logger->records,
+            static fn (array $record): bool => $record['message'] === 'no-pending-versions',
+        ));
+        self::assertCount(1, $records);
+        self::assertSame('close-task', $records[0]['context']['resolution']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function taskRow(int $taskUid): array
+    {
+        $queryBuilder = $this->getConnectionPool()->getQueryBuilderForTable('tx_editorialflow_task');
+        $queryBuilder->getRestrictions()->removeAll();
+
+        $row = $queryBuilder
+            ->select('*')
+            ->from('tx_editorialflow_task')
+            ->where($queryBuilder->expr()->eq('uid', $queryBuilder->createNamedParameter($taskUid)))
+            ->executeQuery()
+            ->fetchAssociative();
+        self::assertIsArray($row);
+
+        return $row;
+    }
+
+    /**
      * @param array<string, mixed> $overrides
      */
     private function createOpenTask(array $overrides = []): int
