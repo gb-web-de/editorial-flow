@@ -593,6 +593,9 @@
             <trans-unit id="conflict.diff.invalid" xml:space="preserve">
                 <source>Invalid record.</source>
             </trans-unit>
+            <trans-unit id="widget.group.editorialFlow" xml:space="preserve">
+                <source>Editorial Flow</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

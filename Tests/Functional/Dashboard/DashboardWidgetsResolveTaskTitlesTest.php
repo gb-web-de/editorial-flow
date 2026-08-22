@@ -6,6 +6,7 @@ namespace GbWeb\EditorialFlow\Tests\Functional\Dashboard;
 
 use GbWeb\EditorialFlow\Dashboard\Widget\RecentActivityWidget;
 use GbWeb\EditorialFlow\Dashboard\Widget\RecentCommentsWidget;
+use GbWeb\EditorialFlow\Dashboard\Widget\TaskOverviewWidget;
 use PHPUnit\Framework\Attributes\Test;
 use TYPO3\CMS\Backend\View\BackendViewFactory;
 use TYPO3\CMS\Core\Database\ConnectionPool;
@@ -110,5 +111,66 @@ final class DashboardWidgetsResolveTaskTitlesTest extends FunctionalTestCase
 
         self::assertStringContainsString('Products', $content);
         self::assertStringContainsString('Looks good to me.', $content);
+    }
+
+    /**
+     * The same class of bug as the two above, in the widget an editor is most
+     * likely to look at first: the template read `stats.*` while the widget
+     * assigned `countsByState` and `unassigned`, so all six figures rendered
+     * empty. Nothing caught it, because asserting that a template renders is
+     * not the same as asserting what it renders.
+     */
+    #[Test]
+    public function taskOverviewWidgetRendersRealNumbers(): void
+    {
+        // Written out rather than using createTask(), which fixes state to
+        // in_progress - the point here is that each state lands in its own row.
+        $this->createTaskWith(['title' => 'Backlog one', 'state' => 'backlog']);
+        $this->createTaskWith(['title' => 'Backlog two', 'state' => 'backlog']);
+        $this->createTaskWith(['title' => 'Being written', 'state' => 'in_progress', 'assignee' => 1]);
+        $this->createTaskWith(['title' => 'Finished', 'state' => 'done', 'closed' => 1]);
+
+        $widget = new TaskOverviewWidget(
+            new WidgetConfiguration('test', 'test', [], 'Test', '', '', 'medium', 'medium'),
+            $this->get(BackendViewFactory::class),
+            $this->get(ConnectionPool::class),
+        );
+
+        $content = $widget->renderWidget($this->context())->content;
+
+        self::assertMatchesRegularExpression(
+            '/editorialflow-widget-stat-value">\s*3\s*</',
+            $content,
+            'three tasks are open - the closed one is not',
+        );
+        self::assertMatchesRegularExpression(
+            '/editorialflow-widget-stat-value--done">\s*1\s*</',
+            $content,
+            'and "done" has to be counted on the closed side, where it actually lives',
+        );
+        self::assertMatchesRegularExpression('/Backlog<\/span><strong>2<\/strong>/', $content);
+        self::assertMatchesRegularExpression('/In progress<\/span><strong>1<\/strong>/', $content);
+        // Documented as deliberately prominent, and previously not rendered at
+        // all. Two of the three open tasks have no assignee; the closed one does
+        // not count, since nobody can pick up finished work.
+        self::assertMatchesRegularExpression('/Unassigned<\/span><strong>2<\/strong>/', $content);
+    }
+
+    /**
+     * @param array<string, mixed> $overrides
+     */
+    private function createTaskWith(array $overrides): int
+    {
+        $connection = $this->getConnectionPool()->getConnectionForTable('tx_editorialflow_task');
+        $connection->insert('tx_editorialflow_task', array_merge([
+            'title' => 'Task',
+            'subject_table' => 'pages',
+            'subject_uid' => 1,
+            'subject_pid' => 1,
+            'state' => 'backlog',
+            'closed' => 0,
+        ], $overrides));
+
+        return (int)$connection->lastInsertId();
     }
 }

@@ -1,27 +1,46 @@
 <html xmlns:f="http://typo3.org/ns/TYPO3/CMS/Fluid/ViewHelpers" data-namespace-typo3-fluid="true">
+<f:comment>
+    Every number here comes from the `stats` array TaskOverviewWidget assigns.
+    It used to assign `countsByState` and `unassigned` instead, so all six
+    figures rendered empty - which no test caught, because the widget test only
+    asserted that the template rendered at all.
+
+    Colours come from TYPO3's own tokens throughout, including the row rule that
+    used to be a hard-coded #eee and stayed invisible in dark mode.
+</f:comment>
 <div class="widget-content">
-    <div class="editorialflow-widget-stats" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 12px;">
-        <div class="stat-card" style="background: var(--typo3-surface-container, #f3f4f6); padding: 12px; border-radius: 6px; text-align: center;">
-            <div style="font-size: 24px; font-weight: 700; color: var(--typo3-color-primary, #0078d4);">{stats.total_open}</div>
-            <div style="font-size: 11px; text-transform: uppercase; opacity: 0.8;">Open Tasks</div>
+    <div class="editorialflow-widget-stats">
+        <div class="editorialflow-widget-stat">
+            <div class="editorialflow-widget-stat-value">{stats.total_open}</div>
+            <div class="editorialflow-widget-stat-label">Open tasks</div>
         </div>
-        <div class="stat-card" style="background: var(--typo3-surface-container, #f3f4f6); padding: 12px; border-radius: 6px; text-align: center;">
-            <div style="font-size: 24px; font-weight: 700; color: var(--typo3-state-success-text, #107c41);">{stats.done}</div>
-            <div style="font-size: 11px; text-transform: uppercase; opacity: 0.8;">Completed</div>
+        <div class="editorialflow-widget-stat">
+            <div class="editorialflow-widget-stat-value editorialflow-widget-stat-value--done">{stats.done}</div>
+            <div class="editorialflow-widget-stat-label">Completed</div>
         </div>
     </div>
-    <div class="stat-breakdown" style="padding: 0 12px 12px; font-size: 12px;">
-        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee;">
+    <div class="editorialflow-widget-breakdown">
+        <div class="editorialflow-widget-row">
             <span>Backlog</span><strong>{stats.backlog}</strong>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee;">
+        <div class="editorialflow-widget-row">
             <span>Planned</span><strong>{stats.planned}</strong>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid #eee;">
-            <span>In Progress</span><strong>{stats.in_progress}</strong>
+        <div class="editorialflow-widget-row">
+            <span>In progress</span><strong>{stats.in_progress}</strong>
         </div>
-        <div style="display: flex; justify-content: space-between; padding: 4px 0;">
-            <span>Review</span><strong>{stats.review}</strong>
+        <div class="editorialflow-widget-row">
+            <span>In review</span><strong>{stats.review}</strong>
+        </div>
+        <f:comment>
+            The one number the widget's own docblock calls deliberately
+            prominent, and the only one that is a call to action rather than a
+            report: work nobody has picked up. Styled as a warning only when
+            there is something to pick up - and it always carries its label, so
+            the state is never colour alone.
+        </f:comment>
+        <div class="editorialflow-widget-row editorialflow-widget-row--callout{f:if(condition: stats.unassigned, then: ' editorialflow-widget-row--attention')}">
+            <span>Unassigned</span><strong>{stats.unassigned}</strong>
         </div>
     </div>
 </div>

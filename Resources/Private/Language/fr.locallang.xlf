@@ -707,6 +707,10 @@
                 <source>Invalid record.</source>
                 <target>Enregistrement invalide.</target>
             </trans-unit>
+            <trans-unit id="widget.group.editorialFlow" xml:space="preserve">
+                <source>Editorial Flow</source>
+                <target>Editorial Flow</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

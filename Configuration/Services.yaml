@@ -32,10 +32,10 @@ services:
     tags:
       - name: dashboard.widget
         identifier: editorialFlowTaskOverview
-        groupNames: 'general'
+        groupNames: 'editorialFlow'
         title: 'Editorial Flow: Task overview'
         description: 'How much work sits in each state, and what nobody has taken yet'
-        iconIdentifier: apps-pagetree-page-default
+        iconIdentifier: content-widget-chart-bar
         height: 'medium'
         width: 'medium'
 
@@ -43,7 +43,7 @@ services:
     tags:
       - name: dashboard.widget
         identifier: editorialFlowMyTasks
-        groupNames: 'general'
+        groupNames: 'editorialFlow'
         title: 'Editorial Flow: My tasks'
         description: 'Tasks assigned to you'
         iconIdentifier: status-user-backend
@@ -54,10 +54,10 @@ services:
     tags:
       - name: dashboard.widget
         identifier: editorialFlowRecentActivity
-        groupNames: 'general'
+        groupNames: 'editorialFlow'
         title: 'Editorial Flow: Recent activity'
         description: 'Latest editorial decisions across the board'
-        iconIdentifier: actions-document-history
+        iconIdentifier: actions-history
         height: 'medium'
         width: 'medium'
 
@@ -68,7 +68,7 @@ services:
     tags:
       - name: dashboard.widget
         identifier: editorialFlowRecentComments
-        groupNames: 'general'
+        groupNames: 'editorialFlow'
         title: 'Editorial Flow: Recent comments'
         description: 'Catch up on discussion across the board'
         iconIdentifier: actions-message

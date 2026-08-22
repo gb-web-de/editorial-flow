@@ -1264,3 +1264,71 @@
     opacity: 0.65;
     cursor: default !important;
 }
+
+/*
+ * Dashboard widgets.
+ *
+ * Lifted out of the templates' inline style attributes, which is not cosmetic:
+ * the breakdown rows carried a hard-coded `#eee` rule that disappeared in dark
+ * mode, and the stat colours were literal hex values that never adapted. Every
+ * value here is one of core's own tokens, so both themes work with no second
+ * ruleset - the same strategy the board already follows.
+ */
+.editorialflow-widget-stats {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    padding: 12px;
+}
+
+.editorialflow-widget-stat {
+    background: var(--typo3-surface-container, #f3f4f6);
+    border-radius: var(--editorialflow-card-radius);
+    padding: 12px;
+    text-align: center;
+}
+
+.editorialflow-widget-stat-value {
+    color: var(--typo3-component-primary-color, #0078d4);
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.editorialflow-widget-stat-value--done {
+    color: var(--typo3-state-success-color, #107c41);
+}
+
+.editorialflow-widget-stat-label {
+    font-size: 11px;
+    opacity: 0.8;
+    text-transform: uppercase;
+}
+
+.editorialflow-widget-breakdown {
+    font-size: 12px;
+    padding: 0 12px 12px;
+}
+
+.editorialflow-widget-row {
+    border-bottom: 1px solid var(--typo3-component-border-color, #e2e4e8);
+    display: flex;
+    justify-content: space-between;
+    padding: 4px 0;
+}
+
+.editorialflow-widget-row:last-child {
+    border-bottom: 0;
+}
+
+.editorialflow-widget-row--callout {
+    border-bottom: 0;
+    border-top: 1px solid var(--typo3-component-border-color, #e2e4e8);
+    margin-top: 4px;
+    padding-top: 8px;
+}
+
+/* Never colour alone: the row keeps its "Unassigned" label either way. */
+.editorialflow-widget-row--attention strong {
+    color: var(--typo3-state-warning-color, #b35c00);
+}
