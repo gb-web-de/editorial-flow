@@ -103,46 +103,37 @@ final class TaskMemberSynchronizer
      * single member without asking for a whole task's pairs: the frontend
      * renders workspace-overlaid records, so an element there may carry either
      * uid (see TaskAjaxController::listMemberTaskMarkersForPageAction()).
+     *
+     * Delegated to core rather than queried here, so that this extension has
+     * exactly ONE answer to "is there a pending version". Core covers both
+     * cases in one helper: the ordinary `t3ver_oid = $liveUid` version, and the
+     * placeholder-less record created directly inside the workspace (this
+     * extension's own "materialize a pending page" flow reaches that one), whose
+     * own uid IS the pending version because there is no live counterpart to
+     * point back at.
+     *
+     * The hand-rolled pair this replaces got the second case subtly wrong: it
+     * accepted any `t3ver_oid = 0 && t3ver_wsid = N` row, while core also
+     * requires `t3ver_state = NEW_PLACEHOLDER` (BackendUtility.php:2820-2831).
+     * WorkspaceIntegrationService::decorateMembers() already went through core,
+     * so publish/stage/close could see a version the ticket denied - one record,
+     * two answers. Rows that only the loose predicate matched stop counting as
+     * pending now; core would have refused to act on them anyway, and
+     * RepairTaskDataCommand reports them rather than leaving them invisible.
+     *
+     * The DBAL try/catch this replaces existed for tables whose schema lacks the
+     * t3ver_* columns; core checks the TCA workspace capability up front and
+     * returns false, which is the same outcome without the query.
      */
     public function findVersionUid(string $table, int $liveUid, int $workspaceUid): int
     {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable($table);
-        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
-
-        try {
-            $uid = $queryBuilder
-                ->select('uid')
-                ->from($table)
-                ->where(
-                    $queryBuilder->expr()->eq('t3ver_oid', $queryBuilder->createNamedParameter($liveUid, Connection::PARAM_INT)),
-                    $queryBuilder->expr()->eq('t3ver_wsid', $queryBuilder->createNamedParameter($workspaceUid, Connection::PARAM_INT)),
-                )
-                ->setMaxResults(1)
-                ->executeQuery()
-                ->fetchOne();
-        } catch (\Doctrine\DBAL\Exception) {
+        if ($workspaceUid < 1) {
             return 0;
         }
-        if ($uid) {
-            return (int)$uid;
-        }
 
-        // A placeholder-less new record (created directly inside the workspace,
-        // e.g. EditorialFlow's own "materialize a pending page" flow on a ticket
-        // that had no subject yet) has no separate live counterpart to carry a
-        // t3ver_oid pointing back here - the member row's own record_uid already
-        // IS the pending version. Same distinction TaskAutoCreationService::
-        // resolveLiveAndVersion() makes on the capture side.
-        $record = BackendUtility::getRecord($table, $liveUid, 'uid,t3ver_oid,t3ver_wsid');
-        if (
-            $record !== null
-            && (int)($record['t3ver_oid'] ?? -1) === 0
-            && (int)($record['t3ver_wsid'] ?? 0) === $workspaceUid
-        ) {
-            return $liveUid;
-        }
+        $version = BackendUtility::getWorkspaceVersionOfRecord($workspaceUid, $table, $liveUid, 'uid');
 
-        return 0;
+        return is_array($version) ? (int)$version['uid'] : 0;
     }
 
     /**
