@@ -791,6 +791,10 @@
                 <source>Could not read what this task still has pending.</source>
                 <target>Impossible de lire ce que cette tâche a encore en attente.</target>
             </trans-unit>
+            <trans-unit id="ticket.nothingPending" xml:space="preserve">
+                <source>Nothing is pending on this task in its workspace. Any work done here has since been discarded, or published from somewhere else - so there is nothing left to publish or move to another stage. Closing the task is what clears it.</source>
+                <target>Rien n'est en attente sur cette tâche dans son espace de travail. Le travail effectué ici a depuis été supprimé, ou publié depuis ailleurs – il n'y a donc plus rien à publier ni à déplacer vers une autre étape. Clore la tâche est ce qui règle la situation.</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

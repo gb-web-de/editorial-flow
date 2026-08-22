@@ -140,6 +140,28 @@ final class WorkspaceIntegrationService
             'timeline' => $this->buildTimeline($activities, $comments),
             'diffs' => $diffs,
             'checklist' => $checklist,
+            // The stuck state, stated rather than left as an empty list.
+            //
+            // An open task that holds a workspace but has no pending version
+            // anywhere refuses every action - stage moves, planning columns and
+            // publish all ask for a version first - and the ticket otherwise
+            // just looks blank, with no hint why. Deliberately NOT derived from
+            // sys_history: a discarded version's rows stay filed under a uid
+            // nothing resolves any more, and a version published from another
+            // workspace leaves rows under that workspace, so neither case is
+            // visible from here. The absence of a version is the honest signal,
+            // and it is the one every refusal is actually based on.
+            //
+            // Derived from what decorateMembers() already resolved rather than
+            // re-queried: no new dependency (TaskAjaxControllerErrorsTest builds
+            // this class by hand with every argument positional), and no second
+            // answer to a question that must have exactly one.
+            'nothingPending' => !$isClosed
+                && $workspaceUid > 0
+                && array_filter(
+                    $decoratedMembers,
+                    static fn (array $member): bool => ($member['hasPendingVersion'] ?? false) === true,
+                ) === [],
         ];
     }
 

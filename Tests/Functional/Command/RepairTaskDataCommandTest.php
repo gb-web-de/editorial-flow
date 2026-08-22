@@ -191,4 +191,34 @@ final class RepairTaskDataCommandTest extends FunctionalTestCase
 
         self::assertSame(['closed' => 0, 'deleted' => 0], $this->findItem($itemUid));
     }
+
+    /**
+     * The stuck state reported from the data side: an open task holding a
+     * workspace whose member has no pending version refuses every action an
+     * editor has, and the report is what points at closing as the way out.
+     *
+     * Report-only, like reportEmptyTasks() - whether such a task should be
+     * closed or picked back up is an editorial decision.
+     */
+    #[Test]
+    public function reportsAnOpenTaskLeftWithoutAPendingVersion(): void
+    {
+        $taskUid = $this->createTask(['title' => 'Nordheidehalle', 'workspace_uid' => 1]);
+        $this->addMember($taskUid, 10);
+
+        $output = $this->runRepair(false);
+
+        self::assertStringContainsString('with nothing pending', $output);
+        self::assertStringContainsString('Nordheidehalle', $output);
+        self::assertStringContainsString('tt_content:10', $output);
+    }
+
+    #[Test]
+    public function saysNothingAboutTasksThatNeverEnteredAWorkspace(): void
+    {
+        $taskUid = $this->createTask(['workspace_uid' => 0]);
+        $this->addMember($taskUid, 10);
+
+        self::assertStringContainsString('No open tasks with a workspace to check.', $this->runRepair(false));
+    }
 }

@@ -656,6 +656,9 @@
             <trans-unit id="close.error.preview" xml:space="preserve">
                 <source>Could not read what this task still has pending.</source>
             </trans-unit>
+            <trans-unit id="ticket.nothingPending" xml:space="preserve">
+                <source>Nothing is pending on this task in its workspace. Any work done here has since been discarded, or published from somewhere else - so there is nothing left to publish or move to another stage. Closing the task is what clears it.</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

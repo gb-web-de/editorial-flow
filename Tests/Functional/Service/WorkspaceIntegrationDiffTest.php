@@ -190,6 +190,59 @@ final class WorkspaceIntegrationDiffTest extends FunctionalTestCase
     }
 
     /**
+     * The stuck state, stated instead of left as a blank ticket.
+     *
+     * A task holding a workspace with no pending version anywhere refuses every
+     * action, because each one asks for a version first - and the ticket
+     * otherwise just looks empty, with no hint why.
+     *
+     * Not derived from sys_history, which is the obvious thing to try: a
+     * discarded version's rows stay filed under a uid nothing resolves (this
+     * test's own discard leaves them under the version uid, not the live one),
+     * so a history-based check would report nothing at all here.
+     */
+    #[Test]
+    public function aTaskWhoseDraftIsGoneSaysSoRatherThanRenderingBlank(): void
+    {
+        $taskUid = $this->createTaskWithManualMember(1, 'pages', 2);
+        $this->editInWorkspace('pages', 2, ['subtitle' => 'Draft subtitle'], 1);
+
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start([], ['pages' => [2 => ['discard' => true]]]);
+        $dataHandler->process_cmdmap();
+
+        $details = $this->subject()->getTaskDetails($taskUid);
+
+        self::assertTrue($details['nothingPending']);
+    }
+
+    #[Test]
+    public function aTaskWithWorkStillPendingIsNotReportedAsStuck(): void
+    {
+        $taskUid = $this->createTaskWithManualMember(1, 'pages', 2);
+        $this->editInWorkspace('pages', 2, ['subtitle' => 'Draft subtitle'], 1);
+        $GLOBALS['BE_USER']->setWorkspace(1);
+
+        $details = $this->subject()->getTaskDetails($taskUid);
+
+        self::assertFalse($details['nothingPending']);
+    }
+
+    /**
+     * A task that never entered a workspace is not stuck, it is unstarted - and
+     * the planning columns still accept it, so there is nothing to explain.
+     */
+    #[Test]
+    public function aTaskWithoutAWorkspaceIsNotReportedAsStuck(): void
+    {
+        $taskUid = $this->createTaskWithManualMember(0, 'pages', 2);
+
+        $details = $this->subject()->getTaskDetails($taskUid);
+
+        self::assertFalse($details['nothingPending']);
+    }
+
+    /**
      * A finished task must still say what it did.
      *
      * Two things used to empty this out at once: close() marks every member row

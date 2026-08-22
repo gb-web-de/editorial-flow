@@ -74,6 +74,7 @@ final class RepairTaskDataCommand extends Command
         // freed is of no use to anyone until an open task takes it.
         $reclaimed = $fix ? $this->reclaimPagesForOpenTasks($io) : 0;
         $this->reportEmptyTasks($io);
+        $this->reportMissingVersions($io);
 
         if ($orphanCount === 0 && $strandedCount === 0 && $backfillCount === 0 && $reclaimed === 0) {
             $io->success('Nothing to repair.');
@@ -395,4 +396,114 @@ final class RepairTaskDataCommand extends Command
             $io->writeln(sprintf('  task %d: "%s"', $task['uid'], $task['title']));
         }
     }
+
+    /**
+     * Members of an open, workspace-holding task that have no pending version.
+     *
+     * This is the stuck state read from the data side: every exit an editor has
+     * - stage move, planning column, publish - asks for a pending version
+     * first, so a task in this state refuses all of them, and its ticket looks
+     * blank while doing it.
+     *
+     * Deliberately NOT cross-checked against sys_history, which is the obvious
+     * thing to try and does not work. Discarding leaves the version's rows filed
+     * under a uid that no longer resolves, and publishing from another workspace
+     * leaves them under that workspace - so neither case is findable from the
+     * live uid, and requiring a history hit would report nothing at all. The
+     * absence of a version is both observable and the thing every refusal is
+     * actually based on.
+     *
+     * The cost is that a member merely attached and never edited is reported
+     * too. That is not a false positive worth filtering out: it is the same dead
+     * end for the editor, reached a different way.
+     *
+     * Reported, never fixed, for the reason reportEmptyTasks() gives: whether
+     * such a task should be closed or picked back up is an editorial call.
+     * Closing it from the board is now possible, which is what this points at.
+     *
+     * Batched: one query for the open tasks, one for their members, then core's
+     * own version lookup per member - never a query per task.
+     */
+    private function reportMissingVersions(SymfonyStyle $io): void
+    {
+        $taskQueryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE_TASK);
+        $taskQueryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+        $tasks = $taskQueryBuilder
+            ->select('uid', 'title', 'workspace_uid')
+            ->from(self::TABLE_TASK)
+            ->where(
+                $taskQueryBuilder->expr()->eq('closed', $taskQueryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $taskQueryBuilder->expr()->eq('deleted', $taskQueryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $taskQueryBuilder->expr()->gt('workspace_uid', $taskQueryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        if ($tasks === []) {
+            $io->writeln('No open tasks with a workspace to check.');
+            return;
+        }
+
+        $workspaceByTask = [];
+        $titleByTask = [];
+        foreach ($tasks as $task) {
+            $workspaceByTask[(int)$task['uid']] = (int)$task['workspace_uid'];
+            $titleByTask[(int)$task['uid']] = (string)$task['title'];
+        }
+
+        $itemQueryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE_ITEM);
+        $itemQueryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+        $members = $itemQueryBuilder
+            ->select('task', 'record_table', 'record_uid')
+            ->from(self::TABLE_ITEM)
+            ->where(
+                $itemQueryBuilder->expr()->in(
+                    'task',
+                    $itemQueryBuilder->createNamedParameter(array_keys($workspaceByTask), Connection::PARAM_INT_ARRAY),
+                ),
+                $itemQueryBuilder->expr()->eq('closed', $itemQueryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $itemQueryBuilder->expr()->eq('deleted', $itemQueryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->executeQuery()
+            ->fetchAllAssociative();
+
+        $stranded = [];
+        foreach ($members as $member) {
+            $table = (string)$member['record_table'];
+            $recordUid = (int)$member['record_uid'];
+            $taskUid = (int)$member['task'];
+            $workspaceUid = $workspaceByTask[$taskUid] ?? 0;
+
+            if ($this->memberSynchronizer->findVersionUid($table, $recordUid, $workspaceUid) > 0) {
+                continue;
+            }
+
+            $stranded[] = [
+                'task' => $taskUid,
+                'title' => $titleByTask[$taskUid] ?? '',
+                'record' => sprintf('%s:%d', $table, $recordUid),
+                'workspace' => $workspaceUid,
+            ];
+        }
+
+        if ($stranded === []) {
+            $io->writeln('No open tasks stuck without a pending version.');
+            return;
+        }
+
+        $io->section(sprintf(
+            '%d member(s) of open tasks with nothing pending (not fixed automatically):',
+            count($stranded),
+        ));
+        foreach ($stranded as $entry) {
+            $io->writeln(sprintf(
+                '  task %d "%s": %s has no version in workspace %d - never edited there, discarded, or published from elsewhere. Close the task from the board to clear it.',
+                $entry['task'],
+                $entry['title'],
+                $entry['record'],
+                $entry['workspace'],
+            ));
+        }
+    }
+
 }
