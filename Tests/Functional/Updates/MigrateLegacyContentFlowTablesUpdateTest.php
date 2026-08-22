@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Tests\Functional\Updates;
 
+use Doctrine\DBAL\Schema\Index;
 use Doctrine\DBAL\Schema\Table;
 use GbWeb\EditorialFlow\Updates\MigrateLegacyContentFlowTablesUpdate;
 use PHPUnit\Framework\Attributes\Test;
@@ -43,12 +44,42 @@ final class MigrateLegacyContentFlowTablesUpdateTest extends FunctionalTestCase
         return GeneralUtility::makeInstance(MigrateLegacyContentFlowTablesUpdate::class);
     }
 
+    /**
+     * The primary key has to be carried over explicitly.
+     *
+     * Table::__construct()'s third argument is the index list, and leaving it
+     * out drops the primary key along with everything else - which leaves `uid`
+     * as an auto-increment column belonging to no key at all. SQLite hides that:
+     * its platform emits `PRIMARY KEY AUTOINCREMENT` inline for any
+     * auto-increment column, so CI (which runs pdo_sqlite) stayed green while
+     * MySQL/MariaDB rejected the same clone with "there can be only one auto
+     * column and it must be defined as a key".
+     *
+     * Only the primary key, not $reference->getIndexes() wholesale: index names
+     * are global to the database in SQLite, so copying board_scope/subject/
+     * assignee verbatim onto a second table collides there. The primary key is
+     * emitted inline on both platforms, and these legacy tables hold one or two
+     * rows - they need no secondary index.
+     *
+     * Dropped first for the same reason: the testing framework only rebuilds
+     * the schema it knows about, and these tables are not in it. On SQLite each
+     * test gets its own database file so a leftover cannot be observed, but on
+     * MySQL/MariaDB the tests of one class share a database and the second one
+     * to run would hit "table already exists".
+     */
     private function createLegacyTable(string $oldTable, string $newTable): void
     {
         $connection = $this->getConnectionPool()->getConnectionForTable($newTable);
         $schemaManager = $connection->createSchemaManager();
+        if ($schemaManager->tablesExist([$oldTable])) {
+            $schemaManager->dropTable($oldTable);
+        }
         $reference = $schemaManager->introspectTable($newTable);
-        $legacyTable = new Table($oldTable, $reference->getColumns());
+        $primaryKey = array_values(array_filter(
+            $reference->getIndexes(),
+            static fn (Index $index): bool => $index->isPrimary(),
+        ));
+        $legacyTable = new Table($oldTable, $reference->getColumns(), $primaryKey);
         $schemaManager->createTable($legacyTable);
     }
 
