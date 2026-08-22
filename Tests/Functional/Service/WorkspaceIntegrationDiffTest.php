@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Tests\Functional\Service;
 
+use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
 use GbWeb\EditorialFlow\Service\WorkspaceIntegrationService;
 use PHPUnit\Framework\Attributes\Test;
 use TYPO3\CMS\Core\DataHandling\DataHandler;
@@ -185,6 +186,60 @@ final class WorkspaceIntegrationDiffTest extends FunctionalTestCase
             'Page title',
             array_column($details['diffs'], 'label'),
             'the Live-only title change belongs to Live, not to this task',
+        );
+    }
+
+    /**
+     * A finished task must still say what it did.
+     *
+     * Two things used to empty this out at once: close() marks every member row
+     * closed, and findMembers() filters closed = 0, so the ticket had no members
+     * before it looked at a single diff; and the version uid the diff reader
+     * keys on does not survive publishing.
+     */
+    #[Test]
+    public function aClosedTasksTicketStillShowsWhatItChanged(): void
+    {
+        $taskUid = $this->createTaskWithManualMember(1, 'pages', 2);
+        $this->editInWorkspace('pages', 2, ['subtitle' => 'Draft subtitle'], 1);
+        $GLOBALS['BE_USER']->setWorkspace(1);
+
+        $this->get(TaskRepository::class)->close($taskUid, 1);
+
+        $details = $this->subject()->getTaskDetails($taskUid);
+
+        self::assertCount(1, $details['members'], 'the archive reader sees the closed member rows');
+        self::assertNotSame([], $details['diffs'], 'and the trail is still addressable');
+        self::assertContains('Subtitle', array_column($details['diffs'], 'label'));
+    }
+
+    /**
+     * The trap in the archive reader.
+     *
+     * Publishing re-points the version's sys_history rows at the live uid, so
+     * reading the live uid through core's HistoryService looks correct. But that
+     * migration rewrites `recuid` only and never the `workspace` column, while
+     * RecordHistory::findEventsForRecord() always lets workspace = 0 through -
+     * so from Live the live uid returns everybody's Live edits, attributed to
+     * this task. Scoping the query to the task's workspace is what prevents it,
+     * and it has to hold whatever workspace the reader is sitting in.
+     */
+    #[Test]
+    public function aClosedTasksArchiveNeverAdoptsLiveEditsEvenWhenReadFromLive(): void
+    {
+        $this->editInLive('pages', 2, ['title' => 'About us (Live)']);
+
+        $taskUid = $this->createTaskWithManualMember(1, 'pages', 2);
+        $this->editInWorkspace('pages', 2, ['subtitle' => 'Draft subtitle'], 1);
+        $this->get(TaskRepository::class)->close($taskUid, 1);
+
+        $GLOBALS['BE_USER']->setWorkspace(0);
+        $details = $this->subject()->getTaskDetails($taskUid);
+
+        self::assertNotContains(
+            'Page title',
+            array_column($details['diffs'], 'label'),
+            'the Live title change was never this task\'s work',
         );
     }
 }

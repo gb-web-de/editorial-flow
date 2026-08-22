@@ -292,7 +292,13 @@
                                                 </f:if>
                                             </f:then>
                                         </f:if>
-                                        <f:if condition="{card.workspace_uid} > 0 && !{card.foreignWorkspace}">
+                                        <f:comment>
+                                            `!{card.closed}` is not redundant since close() stopped
+                                            zeroing workspace_uid: an archived card keeps the workspace
+                                            it was finished in, and without this it would grow a Publish
+                                            button for work that already went live.
+                                        </f:comment>
+                                        <f:if condition="{card.workspace_uid} > 0 && !{card.foreignWorkspace} && !{card.closed}">
                                             <button type="button" class="btn btn-xs btn-primary editorialflow-action-publish"
                                                     data-task-uid="{card.uid}" data-task-title="{card.title}">
                                                 <core:icon identifier="actions-cloud-upload" size="small" /> Publish

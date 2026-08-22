@@ -166,23 +166,64 @@ final class TaskRepositoryTest extends FunctionalTestCase
         self::assertSame([$taskUid], $foundUids);
     }
 
+    /**
+     * close() used to zero workspace_uid and stage_uid, because
+     * belongsInColumn() required workspace_uid === 0 for a Done match and a
+     * closed task that kept its workspace landed in no column at all.
+     *
+     * But that uid is the only key into what the task actually did: sys_history
+     * records workspace edits under the workspace they happened in, and core
+     * never rewrites that column when publishing. Zeroing it left every closed
+     * task's ticket reporting "nothing edited yet" over a full trail it could no
+     * longer address. belongsInColumn() short-circuits on `closed` instead, so
+     * the column match no longer depends on blanking anything.
+     */
     #[Test]
-    public function closeResetsWorkspaceAndStageUidSoTheTaskMatchesTheDoneColumn(): void
+    public function closeKeepsTheWorkspaceTheTaskWasFinishedIn(): void
     {
-        // BoardColumnRegistry's Done column, and EditorialFlowController::
-        // belongsInColumn(), both require workspace_uid === 0 for a
-        // Content-Flow-owned state like 'done' to match - a closed task that
-        // kept its old workspace/stage uid matched no column at all (or, worse,
-        // a review-stage column it no longer belonged to).
         $taskUid = $this->createTask(['workspace_uid' => 1, 'stage_uid' => 2]);
 
         $this->subject()->close($taskUid, 1);
 
         $task = $this->subject()->findByUid($taskUid);
-        self::assertSame(0, (int)$task['workspace_uid']);
-        self::assertSame(0, (int)$task['stage_uid']);
+        self::assertSame(1, (int)$task['workspace_uid'], 'the archive needs this to find its history');
+        self::assertSame(2, (int)$task['stage_uid']);
         self::assertSame('done', $task['state']);
         self::assertSame(1, (int)$task['closed']);
+    }
+
+    /**
+     * The archive reader. findMembers() filters closed = 0, which is right for
+     * an open task and empties out completely for a closed one, because close()
+     * marks every member row closed along with the task.
+     */
+    #[Test]
+    public function findArchivedMembersReturnsWhatFindMembersHidesAfterClosing(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addRawMember($taskUid, 10);
+        $this->addRawMember($taskUid, 11);
+
+        $this->subject()->close($taskUid, 1);
+
+        self::assertSame([], $this->subject()->findMembers($taskUid));
+        self::assertCount(2, $this->subject()->findArchivedMembers($taskUid));
+    }
+
+    /**
+     * Done carries two facts - `state` and `closed` - and close() is the only
+     * thing that writes both. Reaching Done through moveToColumn() produced a
+     * task that looked finished on the board and was still open in the database.
+     */
+    #[Test]
+    public function moveToColumnRefusesToProduceDone(): void
+    {
+        $taskUid = $this->createTask();
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionCode(1787654321);
+
+        $this->subject()->moveToColumn($taskUid, 'done', 0);
     }
 
     /**

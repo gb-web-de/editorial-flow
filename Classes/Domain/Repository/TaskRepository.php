@@ -356,6 +356,41 @@ final class TaskRepository
     }
 
     /**
+     * Every record a task ever covered, including the ones close() retired.
+     *
+     * findMembers() filters `closed = 0`, which is right for an open task and
+     * empties out completely for a closed one - close() marks every member row
+     * closed along with the task. That left a finished task's ticket claiming
+     * "nothing edited yet" over work that plainly happened.
+     *
+     * Only ever called for a closed task, so the two readers cannot be confused:
+     * an open task's closed member rows are records that were detached or moved
+     * away, and those genuinely do not belong to it any more.
+     *
+     * Soft-deleted rows stay excluded, but the archive may still be smaller than
+     * the task once was: close()'s collision fallback hard-deletes a member row
+     * when every slot in one_open_task_per_record is taken. That row is gone,
+     * and no reader can bring it back.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function findArchivedMembers(int $taskUid): array
+    {
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE_ITEM);
+        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+
+        return $queryBuilder
+            ->select('*')
+            ->from(self::TABLE_ITEM)
+            ->where(
+                $queryBuilder->expr()->eq('task', $queryBuilder->createNamedParameter($taskUid, Connection::PARAM_INT)),
+                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->executeQuery()
+            ->fetchAllAssociative();
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     public function findMembers(int $taskUid): array
@@ -581,16 +616,22 @@ final class TaskRepository
                 'closed_at' => $GLOBALS['EXEC_TIME'],
                 'closed_by' => $beUserId,
                 'tstamp' => $GLOBALS['EXEC_TIME'],
-                // DONE is one of the states TaskState::isOwnedByEditorialFlow()
-                // groups with BACKLOG/PLANNED as "no workspace version backing
-                // it" - leaving the old workspace_uid/stage_uid in place after
-                // close() contradicted that: EditorialFlowController::
-                // belongsInColumn() requires workspace_uid === 0 for the Done
-                // column's state match, so a closed task with its workspace
-                // still attached never landed there, only in whichever stage
-                // column its old stage_uid happened to still match (or nowhere).
-                'workspace_uid' => 0,
-                'stage_uid' => 0,
+                // The workspace the task was finished in is KEPT.
+                //
+                // It used to be zeroed, because belongsInColumn() required
+                // workspace_uid === 0 for a Done match and a closed task that
+                // kept its workspace landed in no column at all - or worse, in
+                // whichever stage column its old stage_uid still matched.
+                //
+                // But that uid is the only key into what the task actually did:
+                // sys_history records workspace edits under the workspace they
+                // happened in, and core never rewrites that column when
+                // publishing. Zeroing it here left every closed task's ticket
+                // reporting "nothing edited yet" over a full trail it could no
+                // longer address. belongsInColumn() now short-circuits on
+                // `closed` instead, which says what was actually meant: a closed
+                // task is in Done because it is closed, not because its
+                // workspace was blanked.
             ],
             ['uid' => $taskUid],
         );

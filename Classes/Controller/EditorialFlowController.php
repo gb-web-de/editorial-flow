@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Controller;
 
+use GbWeb\EditorialFlow\Domain\Model\TaskState;
 use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
 use GbWeb\EditorialFlow\Service\ActiveTaskSession;
 use GbWeb\EditorialFlow\Service\AssignableUserProvider;
@@ -265,8 +266,16 @@ final class EditorialFlowController extends ActionController
             // permissions below are all scoped to the active workspace), so it is
             // shown read-only in the "Other workspaces" column instead - see
             // BoardColumnRegistry::getColumns() and belongsInColumn().
+            //
+            // A CLOSED task is never foreign, whatever workspace it was finished
+            // in. close() keeps that uid now, so without this every archived
+            // task from another workspace would turn into a read-only foreign
+            // card - and the workspace filter could hide the Done column's
+            // contents from the very editor who closed them.
             $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);
-            $task['foreignWorkspace'] = $taskWorkspaceUid > 0 && $taskWorkspaceUid !== $workspaceUid;
+            $task['foreignWorkspace'] = (int)($task['closed'] ?? 0) === 0
+                && $taskWorkspaceUid > 0
+                && $taskWorkspaceUid !== $workspaceUid;
             if ($task['foreignWorkspace']) {
                 $foreignWorkspaceRecord = BackendUtility::getRecord('sys_workspace', $taskWorkspaceUid, 'title');
                 $task['foreignWorkspaceTitle'] = $foreignWorkspaceRecord['title'] ?? ('#' . $taskWorkspaceUid);
@@ -345,6 +354,16 @@ final class EditorialFlowController extends ActionController
      */
     private function belongsInColumn(array $task, array $column): bool
     {
+        // A closed task is in Done because it is closed. Checked first and on
+        // its own: close() keeps the workspace the task was finished in (that
+        // uid is the only key into its sys_history trail), so without this a
+        // closed task with stage_uid 0 would also match the Editing stage
+        // column and appear twice on the board.
+        if ((int)($task['closed'] ?? 0) === 1) {
+            return ($column['stageUidByWorkspace'] ?? null) === null
+                && $column['state'] === TaskState::DONE->value;
+        }
+
         $stageUidByWorkspace = $column['stageUidByWorkspace'] ?? null;
         if ($stageUidByWorkspace !== null) {
             $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);

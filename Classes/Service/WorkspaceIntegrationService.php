@@ -8,8 +8,10 @@ use GbWeb\EditorialFlow\Domain\Repository\TaskChecklistRepository;
 use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
 use TYPO3\CMS\Backend\Utility\BackendUtility;
 use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
+use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Database\Query\Restriction\DeletedRestriction;
+use TYPO3\CMS\Core\DataHandling\History\RecordHistoryStore;
 use TYPO3\CMS\Core\DataHandling\TableColumnType;
 use TYPO3\CMS\Core\Imaging\IconFactory;
 use TYPO3\CMS\Core\Imaging\IconSize;
@@ -58,7 +60,14 @@ final class WorkspaceIntegrationService
         $subjectUid = (int)$task['subject_uid'];
         $subjectRecord = BackendUtility::getRecord($subjectTable, $subjectUid);
 
-        $members = $this->taskRepository->findMembers($taskUid);
+        // A closed task needs the other reader. close() marks every member row
+        // closed along with the task, so findMembers() - which filters
+        // closed = 0 - returns nothing at all for it, and the ticket claimed
+        // "nothing edited yet" over a finished piece of work.
+        $isClosed = (int)($task['closed'] ?? 0) === 1;
+        $members = $isClosed
+            ? $this->taskRepository->findArchivedMembers($taskUid)
+            : $this->taskRepository->findMembers($taskUid);
         $warnedMembers = $this->taskRepository->findWarnedMembers($taskUid, (int)$task['subject_pid']);
         $comments = $this->getTaskComments($taskUid);
         $activities = $this->activityLogger->findByTask($taskUid);
@@ -76,7 +85,9 @@ final class WorkspaceIntegrationService
         // call needed, and nothing to deduplicate. Also stamps `hasDiffs` onto each
         // member so Ticket.html can offer a "Diff" jump button only where there is
         // something to jump to.
-        $diffs = $this->getAggregatedMemberDiffs($decoratedMembers);
+        $diffs = $isClosed
+            ? $this->getArchivedMemberDiffs($decoratedMembers, $workspaceUid, (int)($task['closed_at'] ?? 0))
+            : $this->getAggregatedMemberDiffs($decoratedMembers);
         // "Covered records" is meant to show what this task actually did, not
         // every record that merely sits on the page - a page with a dozen
         // untouched content elements would otherwise bury the one that was
@@ -172,6 +183,145 @@ final class WorkspaceIntegrationService
             }
         }
         unset($member);
+
+        return $diffs;
+    }
+
+    /**
+     * What a finished task changed, read back after its versions are gone.
+     *
+     * The version uid getAggregatedMemberDiffs() keys on does not survive
+     * publishing, so a closed task has to be read a different way - and the
+     * obvious different way is wrong. Passing the LIVE uid to core's
+     * HistoryService looks like it would work, because publishing re-points the
+     * version's sys_history rows at the live uid
+     * (RecordHistoryStore::migrateWorkspaceHistory()). But that migration
+     * rewrites `recuid` only and never touches the `workspace` column, while
+     * RecordHistory::findEventsForRecord() filters on the READER's current
+     * workspace and always lets `workspace = 0` through. Read from Live, the
+     * live uid therefore returns everybody's Live edits, attributed to this
+     * task - exactly the defect WorkspaceIntegrationDiffTest exists to prevent.
+     *
+     * So sys_history is queried directly and scoped by construction: rows for
+     * this record, in the workspace this task was finished in, up to the moment
+     * it closed. Nothing else can leak in, whatever workspace the reader is
+     * sitting in.
+     *
+     * Only the changed field LABELS are reported, not rendered value diffs. The
+     * old and new values are still in history_data, but rendering them needs the
+     * record's TCA resolved as it was at the time, and "Header, Text and Page
+     * title were changed" already answers what an archive is asked. The full
+     * before/after belongs to the live record's own history in TYPO3's History
+     * module, which is one click away and cannot go stale.
+     *
+     * @param list<array<string, mixed>> $decoratedMembers
+     * @return list<array{label: string, html: string, user: string, datetime: string, record: string, table: string, uid: int}>
+     */
+    private function getArchivedMemberDiffs(array &$decoratedMembers, int $workspaceUid, int $closedAt): array
+    {
+        $diffs = [];
+        foreach ($decoratedMembers as &$member) {
+            $table = (string)$member['record_table'];
+            $uid = (int)$member['record_uid'];
+            // Both uids, because where the history sits depends on how the task
+            // ended. Publishing migrates the version's sys_history rows onto the
+            // live uid (RecordHistoryStore::migrateWorkspaceHistory); closing
+            // with the version left pending does not, so those rows are still
+            // filed under the version. A discarded version's rows stay under a
+            // uid nothing resolves any more, and are correctly not found here -
+            // the work was thrown away, and the trail says so by its absence.
+            $recordUids = [$uid];
+            $versionUid = (int)($member['versionUid'] ?? 0);
+            if ($versionUid > 0 && $versionUid !== $uid) {
+                $recordUids[] = $versionUid;
+            }
+
+            $memberDiffs = $workspaceUid > 0
+                ? $this->getArchivedRecordDiffs($table, $recordUids, $workspaceUid, $closedAt)
+                : [];
+            $member['hasDiffs'] = $memberDiffs !== [];
+            foreach ($memberDiffs as $diff) {
+                $diff['record'] = ($member['title'] ?? '') !== ''
+                    ? sprintf('%s (%s:%d)', $member['title'], $table, $uid)
+                    : sprintf('%s:%d', $table, $uid);
+                $diff['table'] = $table;
+                $diff['uid'] = $uid;
+                $diffs[] = $diff;
+            }
+        }
+        unset($member);
+
+        return $diffs;
+    }
+
+    /**
+     * One archived record's changed fields, straight out of sys_history.
+     *
+     * @param list<int> $recordUids the live uid, plus the version's where it is
+     *        still resolvable - see the caller for why both are needed
+     * @return list<array{label: string, html: string, user: string, datetime: string}>
+     */
+    private function getArchivedRecordDiffs(string $table, array $recordUids, int $workspaceUid, int $closedAt): array
+    {
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('sys_history');
+        $queryBuilder->getRestrictions()->removeAll();
+
+        $queryBuilder
+            ->select('history_data', 'tstamp', 'userid')
+            ->from('sys_history')
+            ->where(
+                $queryBuilder->expr()->eq('tablename', $queryBuilder->createNamedParameter($table)),
+                $queryBuilder->expr()->in(
+                    'recuid',
+                    $queryBuilder->createNamedParameter($recordUids, Connection::PARAM_INT_ARRAY),
+                ),
+                // Never workspace 0. That is Live's own history, made by anyone
+                // at any time, and it is not what this task did.
+                $queryBuilder->expr()->eq('workspace', $queryBuilder->createNamedParameter($workspaceUid, Connection::PARAM_INT)),
+                $queryBuilder->expr()->neq(
+                    'actiontype',
+                    $queryBuilder->createNamedParameter(RecordHistoryStore::ACTION_STAGECHANGE, Connection::PARAM_INT),
+                ),
+            )
+            ->orderBy('uid', 'DESC');
+
+        if ($closedAt > 0) {
+            // Whatever happened to the live record after this task ended belongs
+            // to whoever did it, not to this archive.
+            $queryBuilder->andWhere(
+                $queryBuilder->expr()->lte('tstamp', $queryBuilder->createNamedParameter($closedAt, Connection::PARAM_INT)),
+            );
+        }
+
+        $schema = $this->tcaSchemaFactory->has($table) ? $this->tcaSchemaFactory->get($table) : null;
+
+        $diffs = [];
+        foreach ($queryBuilder->executeQuery()->fetchAllAssociative() as $row) {
+            $data = json_decode((string)$row['history_data'], true);
+            if (!is_array($data) || !is_array($data['newRecord'] ?? null)) {
+                continue;
+            }
+
+            $user = BackendUtility::getRecord('be_users', (int)$row['userid'], 'username,realName') ?? [];
+            $userName = (string)($user['realName'] ?? '') !== ''
+                ? (string)$user['realName']
+                : (string)($user['username'] ?? '');
+
+            foreach (array_keys($data['newRecord']) as $field) {
+                $field = (string)$field;
+                $label = $schema !== null && $schema->hasField($field)
+                    ? $this->getLanguageService()->sL($schema->getField($field)->getLabel())
+                    : $field;
+
+                $diffs[] = [
+                    'label' => $label !== '' ? $label : $field,
+                    // No rendered markup for an archive - see the docblock above.
+                    'html' => '',
+                    'user' => $userName,
+                    'datetime' => BackendUtility::datetime((int)$row['tstamp']),
+                ];
+            }
+        }
 
         return $diffs;
     }
