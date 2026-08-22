@@ -1398,3 +1398,22 @@
 .editorialflow-close-choice input:disabled ~ .editorialflow-close-hint {
     opacity: 0.6;
 }
+
+/*
+ * An element that merely sits on a covered page, versus one somebody edited.
+ *
+ * syncPageMembers() claims every trackable record on the page a task covers, so
+ * most badges on a page mean "belongs here", not "was worked on". Rendering
+ * both identically made a page of nine elements look like nine pieces of work
+ * when two had been touched. The distinction is carried by the wording first -
+ * the badge says "not edited yet" - and only reinforced by weight and opacity.
+ */
+.editorialflow-element-badge--untouched {
+    opacity: 0.7;
+}
+
+.editorialflow-element-badge-note {
+    font-weight: 400;
+    font-style: italic;
+    opacity: 0.85;
+}

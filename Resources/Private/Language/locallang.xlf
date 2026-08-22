@@ -659,6 +659,15 @@
             <trans-unit id="ticket.nothingPending" xml:space="preserve">
                 <source>Nothing is pending on this task in its workspace. Any work done here has since been discarded, or published from somewhere else - so there is nothing left to publish or move to another stage. Closing the task is what clears it.</source>
             </trans-unit>
+            <trans-unit id="active.start.title" xml:space="preserve">
+                <source>Your edits on this page will belong to this task</source>
+            </trans-unit>
+            <trans-unit id="active.start.liveTitle" xml:space="preserve">
+                <source>Switch into a workspace first - edits made in Live are not tracked by Editorial Flow.</source>
+            </trans-unit>
+            <trans-unit id="badge.onPageOnly" xml:space="preserve">
+                <source>on this page, not edited yet</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

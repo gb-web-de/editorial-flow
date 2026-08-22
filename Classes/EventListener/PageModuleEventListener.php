@@ -106,6 +106,11 @@ final class PageModuleEventListener
         ));
         $view->assignMultiple([
             'pageUid' => $pageUid,
+            // The banner offers "work on this task", and that declaration can
+            // capture nothing in Live: captureEdit() returns immediately when
+            // the workspace is 0. Passed so the button can say so rather than
+            // silently doing nothing.
+            'workspaceUid' => (int)$this->getBackendUser()->workspace,
             'pageTitle' => $pageTitle,
             'tasks' => $tasks,
             'activeTaskUid' => $activeTaskUid,

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Tests\Functional\Hooks;
 
+use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
+use GbWeb\EditorialFlow\Service\ActiveTaskSession;
 use PHPUnit\Framework\Attributes\Test;
 use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
@@ -90,6 +92,23 @@ final class TaskAutoCreationTest extends FunctionalTestCase
         ], $overrides));
 
         return (int)$connection->lastInsertId();
+    }
+
+    private function addOpenMember(int $taskUid, string $table, int $recordUid): void
+    {
+        $this->getConnectionPool()->getConnectionForTable('tx_editorialflow_task_item')->insert(
+            'tx_editorialflow_task_item',
+            [
+                'task' => $taskUid,
+                'record_table' => $table,
+                'record_uid' => $recordUid,
+                'origin' => 'manual',
+                'pid' => 2,
+                'home_pid' => 2,
+                'closed' => 0,
+                'deleted' => 0,
+            ],
+        );
     }
 
     /**
@@ -317,5 +336,75 @@ final class TaskAutoCreationTest extends FunctionalTestCase
         self::assertCount(1, $tasks, 'a workspace deletion should open a task for the page');
         self::assertSame('pages', $tasks[0]['subject_table']);
         self::assertSame(2, (int)$tasks[0]['subject_uid']);
+    }
+
+    /**
+     * A page-scoped declaration covers the page, not just the task's subject.
+     *
+     * This is what "switch task, but the content does not change" turned out to
+     * be. The page module banner used to pass the TASK's own subject as the
+     * declaration context, so a task about one content element got a
+     * declaration scoped to that element - which captured nothing new, since
+     * the element was already its member. The same button on a page-subject
+     * task got a page-wide declaration and swallowed everything. One control,
+     * two unrelated behaviours.
+     *
+     * The banner now always declares the page, which is what a page surface
+     * means. ActiveTaskSession still supports the record scope; the Visual
+     * Editor sets that one deliberately.
+     */
+    #[Test]
+    public function aPageScopedDeclarationClaimsEveryElementEditedOnThatPage(): void
+    {
+        // A task about ONE element, the shape that used to be a no-op.
+        $elementTask = $this->createOpenTask([
+            'title' => 'Optional Items',
+            'subject_table' => 'tt_content',
+            'subject_uid' => 11,
+            'subject_pid' => 2,
+            'workspace_uid' => 1,
+        ]);
+        $this->addOpenMember($elementTask, 'tt_content', 11);
+
+        $this->get(ActiveTaskSession::class)->remember($GLOBALS['BE_USER'], 2, $elementTask);
+
+        // A DIFFERENT element on the same page.
+        $this->editInWorkspace('tt_content', 10, ['header' => 'Clothing (draft)']);
+
+        self::assertSame(
+            $elementTask,
+            (int)($this->taskRepository()->findOpenTaskByMember('tt_content', 10)['uid'] ?? 0),
+            'the declaration was made for the page, so the page\'s edits belong to it',
+        );
+    }
+
+    #[Test]
+    public function aRecordScopedDeclarationLeavesOtherElementsAlone(): void
+    {
+        $elementTask = $this->createOpenTask([
+            'title' => 'Optional Items',
+            'subject_table' => 'tt_content',
+            'subject_uid' => 11,
+            'subject_pid' => 2,
+            'workspace_uid' => 1,
+        ]);
+        $this->addOpenMember($elementTask, 'tt_content', 11);
+
+        // What the Visual Editor declares: this record, nothing else.
+        $this->get(ActiveTaskSession::class)
+            ->rememberForContext($GLOBALS['BE_USER'], 'tt_content', 11, $elementTask);
+
+        $this->editInWorkspace('tt_content', 10, ['header' => 'Clothing (draft)']);
+
+        self::assertNotSame(
+            $elementTask,
+            (int)($this->taskRepository()->findOpenTaskByMember('tt_content', 10)['uid'] ?? 0),
+            'a record-scoped choice must not reach across the page',
+        );
+    }
+
+    private function taskRepository(): TaskRepository
+    {
+        return $this->get(TaskRepository::class);
     }
 }

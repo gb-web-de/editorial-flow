@@ -15,6 +15,7 @@ use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use TYPO3\CMS\Core\Domain\RecordInterface;
 use TYPO3\CMS\Core\Imaging\IconFactory;
 use TYPO3\CMS\Core\Imaging\IconSize;
+use TYPO3\CMS\Core\Localization\LanguageService;
 
 /**
  * Marks a content element in the Page module when a task already claims it.
@@ -37,7 +38,7 @@ final class ContentElementTaskBadgeListener
      * module render walks every element on the page, and asking the database
      * for each one would turn one query into dozens.
      *
-     * @var array<int, array<string, array{title: string, hue: float, isActive: bool, isSubject: bool, hasConflict: bool, conflictLabel: string}>>
+     * @var array<int, array<string, array{title: string, hue: float, isActive: bool, isSubject: bool, hasConflict: bool, conflictLabel: string, isEdited: bool}>>
      */
     private array $claimsByPage = [];
 
@@ -76,21 +77,34 @@ final class ContentElementTaskBadgeListener
     }
 
     /**
-     * @param array{title: string, hue: float, isActive: bool, isSubject: bool, hasConflict: bool, conflictLabel: string} $claim
+     * @param array{title: string, hue: float, isActive: bool, isSubject: bool, hasConflict: bool, conflictLabel: string, isEdited: bool} $claim
      */
     private function renderBadge(array $claim, string $table, int $recordUid, string $recordTitle): string
     {
         // Never colour alone: the badge always carries the task's name, and the
         // active one says so in words rather than only through its ring.
         $label = htmlspecialchars($claim['title'], ENT_QUOTES | ENT_HTML5);
-        $title = $claim['isActive']
-            ? 'You picked this task in the Visual Editor - edits here go to it'
-            : 'This element already belongs to this task';
+        // An untouched element says so in words too, not just by being paler:
+        // nine identical pills on a page where two elements were actually
+        // edited is what made the badge misleading in the first place.
+        if (!$claim['isEdited']) {
+            $label .= ' <span class="editorialflow-element-badge-note">'
+                . htmlspecialchars($this->getLanguageService()->sL(
+                    'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:badge.onPageOnly',
+                ) ?: 'on this page, not edited yet', ENT_QUOTES | ENT_HTML5)
+                . '</span>';
+        }
+        $title = match (true) {
+            $claim['isActive'] => 'You picked this task in the Visual Editor - edits here go to it',
+            $claim['isEdited'] => 'This element has unpublished changes in this task',
+            default => 'This element belongs to this task because it sits on the page the task covers - nobody has edited it here yet',
+        };
 
         return sprintf(
-            '<div class="editorialflow-element-badge%s" style="--editorialflow-task-hue: %s" title="%s">'
+            '<div class="editorialflow-element-badge%s%s" style="--editorialflow-task-hue: %s" title="%s">'
                 . '<span class="editorialflow-task-dot"></span>%s%s</div>%s',
             $claim['isActive'] ? ' editorialflow-element-badge--active' : '',
+            $claim['isEdited'] ? '' : ' editorialflow-element-badge--untouched',
             (string)$claim['hue'],
             htmlspecialchars($title, ENT_QUOTES | ENT_HTML5),
             $label,
@@ -184,7 +198,7 @@ final class ContentElementTaskBadgeListener
     }
 
     /**
-     * @return array<string, array{title: string, hue: float, isActive: bool, isSubject: bool, hasConflict: bool, conflictLabel: string}>
+     * @return array<string, array{title: string, hue: float, isActive: bool, isSubject: bool, hasConflict: bool, conflictLabel: string, isEdited: bool}>
      */
     private function claimsFor(int $pageUid): array
     {
@@ -207,7 +221,19 @@ final class ContentElementTaskBadgeListener
                 $liveUidsByTable[(string)$member['record_table']][] = (int)$member['record_uid'];
             }
         }
-        $conflicts = $this->conflictDetector->findConflicts($liveUidsByTable);
+        // One pass, two answers: which records are contested, and which have a
+        // pending version at all. The second is what tells an element somebody
+        // actually worked on from one merely swept onto the task because it sits
+        // on the page the task covers.
+        $pendingWorkspaces = $this->conflictDetector->findPendingWorkspacesForRecords($liveUidsByTable);
+        $conflicts = [];
+        foreach ($pendingWorkspaces as $table => $byLiveUid) {
+            foreach ($byLiveUid as $liveUid => $workspaceUids) {
+                if (count($workspaceUids) >= 2) {
+                    $conflicts[$table][$liveUid] = $workspaceUids;
+                }
+            }
+        }
 
         $claims = [];
         foreach ($tasks as $task) {
@@ -234,6 +260,14 @@ final class ContentElementTaskBadgeListener
                         && $memberUid === (int)$task['subject_uid'],
                     'hasConflict' => $workspaceUids !== null,
                     'conflictLabel' => $conflictLabel,
+                    // Membership alone says almost nothing: syncPageMembers()
+                    // claims every trackable record on the covered page, so most
+                    // badges on a page mean "sits here", not "was worked on". A
+                    // pending version in the task's own workspace is the
+                    // difference, and it is the one an editor is reading the
+                    // badge for.
+                    'isEdited' => $taskWorkspaceUid > 0
+                        && in_array($taskWorkspaceUid, $pendingWorkspaces[$memberTable][$memberUid] ?? [], true),
                 ] + $entry;
             }
         }
@@ -244,5 +278,10 @@ final class ContentElementTaskBadgeListener
     private function getBackendUser(): BackendUserAuthentication
     {
         return $GLOBALS['BE_USER'];
+    }
+
+    private function getLanguageService(): LanguageService
+    {
+        return $GLOBALS['LANG'];
     }
 }

@@ -11,8 +11,10 @@ use GbWeb\EditorialFlow\Service\TaskColor;
 use PHPUnit\Framework\Attributes\Test;
 use TYPO3\CMS\Backend\View\Event\AfterPageContentPreviewRenderedEvent;
 use TYPO3\CMS\Backend\View\PageLayoutContext;
+use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Domain\RecordFactory;
 use TYPO3\CMS\Core\Localization\LanguageServiceFactory;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\TestingFramework\Core\Functional\FunctionalTestCase;
 
 /**
@@ -196,5 +198,50 @@ final class ContentElementTaskBadgeListenerTest extends FunctionalTestCase
         $output = $this->renderPreviewFor(10);
 
         self::assertStringNotContainsString('editorialflow-element-badge', $output);
+    }
+
+    /**
+     * The distinction the badge had been hiding.
+     *
+     * syncPageMembers() claims every trackable record on the page a task
+     * covers, so most badges mean "sits here", not "was worked on". Rendering
+     * both the same way made a page of nine elements look like nine pieces of
+     * work when two had actually been touched - which is exactly how it was
+     * reported.
+     */
+    #[Test]
+    public function anElementNobodyEditedSaysSoRatherThanLookingLikeWork(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 10);
+
+        $output = $this->renderPreviewFor(10);
+
+        self::assertStringContainsString('editorialflow-element-badge--untouched', $output);
+        // Wording first, styling second - the state must survive greyscale.
+        self::assertStringContainsString('not edited yet', $output);
+    }
+
+    #[Test]
+    public function anElementWithPendingChangesIsNotMarkedUntouched(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 10);
+        $this->editInWorkspace(10, 'Intro text (draft)');
+
+        $output = $this->renderPreviewFor(10);
+
+        self::assertStringNotContainsString('editorialflow-element-badge--untouched', $output);
+        self::assertStringNotContainsString('not edited yet', $output);
+        self::assertStringContainsString('editorialflow-element-badge', $output);
+    }
+
+    private function editInWorkspace(int $uid, string $header): void
+    {
+        $GLOBALS['BE_USER']->setWorkspace(1);
+
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['tt_content' => [$uid => ['header' => $header]]], []);
+        $dataHandler->process_datamap();
     }
 }

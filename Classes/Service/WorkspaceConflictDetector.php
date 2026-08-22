@@ -46,14 +46,8 @@ final class WorkspaceConflictDetector
     public function findConflicts(array $liveUidsByTable): array
     {
         $conflicts = [];
-        foreach ($liveUidsByTable as $table => $liveUids) {
-            $liveUids = array_values(array_unique(array_filter($liveUids, static fn (int $uid): bool => $uid > 0)));
-            if ($liveUids === []) {
-                continue;
-            }
-
-            $workspacesByLiveUid = $this->fetchPendingWorkspaces($table, $liveUids);
-            foreach ($workspacesByLiveUid as $liveUid => $workspaceUids) {
+        foreach ($this->findPendingWorkspacesForRecords($liveUidsByTable) as $table => $byLiveUid) {
+            foreach ($byLiveUid as $liveUid => $workspaceUids) {
                 if (count($workspaceUids) >= 2) {
                     $conflicts[$table][$liveUid] = $workspaceUids;
                 }
@@ -61,6 +55,37 @@ final class WorkspaceConflictDetector
         }
 
         return $conflicts;
+    }
+
+    /**
+     * The full picture findConflicts() narrows down: which workspaces hold a
+     * pending version of each of these records, conflict or not.
+     *
+     * Public because "is there a pending version at all" is a different and
+     * equally batched question - the page module's element badges need it to
+     * tell an element somebody actually worked on from one merely swept onto a
+     * task because it sits on the covered page. Answering that per element
+     * would turn one query per table into one per element.
+     *
+     * @param array<string, list<int>> $liveUidsByTable table => distinct live uids to check
+     * @return array<string, array<int, list<int>>> table => live uid => workspace uids, ascending
+     */
+    public function findPendingWorkspacesForRecords(array $liveUidsByTable): array
+    {
+        $pending = [];
+        foreach ($liveUidsByTable as $table => $liveUids) {
+            $liveUids = array_values(array_unique(array_filter($liveUids, static fn (int $uid): bool => $uid > 0)));
+            if ($liveUids === []) {
+                continue;
+            }
+
+            $byLiveUid = $this->fetchPendingWorkspaces($table, $liveUids);
+            if ($byLiveUid !== []) {
+                $pending[$table] = $byLiveUid;
+            }
+        }
+
+        return $pending;
     }
 
     /**

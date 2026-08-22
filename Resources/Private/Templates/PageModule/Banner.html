@@ -37,6 +37,21 @@
                                         <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:banner.active" default="you are working on this" />
                                     </span>
                                 </f:if>
+                                <f:comment>
+                                    The context is the PAGE, not the task's own subject.
+
+                                    This banner is a page surface, and "work on this
+                                    task" said here means "while I am on this page, my
+                                    edits belong to that task". Passing the subject made
+                                    the same button behave in two unrelated ways: a
+                                    page-subject task got a page-wide declaration and
+                                    collected every edit, while a task about one content
+                                    element got a declaration scoped to that element -
+                                    which changed nothing at all, since the element was
+                                    already its member. ActiveTaskSession::resolveForEdit()
+                                    still supports both scopes; the Visual Editor sets the
+                                    record-scoped one deliberately.
+                                </f:comment>
                                 <f:if condition="{task.subject_uid} > 0">
                                     <f:if condition="{task.isActive}">
                                         <f:then>
@@ -47,11 +62,23 @@
                                             </button>
                                         </f:then>
                                         <f:else>
+                                            <f:comment>
+                                                Disabled rather than hidden in Live, the same
+                                                rule publish.js follows: an editor should see
+                                                that the action exists and why it is
+                                                unavailable, not wonder where it went. In Live
+                                                the declaration can capture nothing at all -
+                                                TaskAutoCreationService::captureEdit() returns
+                                                immediately when the workspace is 0, because
+                                                there is nothing to review against.
+                                            </f:comment>
                                             <button type="button" class="btn btn-xs btn-default"
                                                     data-editorialflow-set-active="{task.uid}"
-                                                    data-editorialflow-context-table="{task.subject_table}"
-                                                    data-editorialflow-context-uid="{task.subject_uid}"
-                                                    data-editorialflow-reload="true">
+                                                    data-editorialflow-context-table="pages"
+                                                    data-editorialflow-context-uid="{pageUid}"
+                                                    data-editorialflow-reload="true"
+                                                    disabled="{f:if(condition: workspaceUid, else: 'disabled')}"
+                                                    title="{f:if(condition: workspaceUid, then: '{f:translate(key: \'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:active.start.title\', default: \'Your edits on this page will belong to this task\')}', else: '{f:translate(key: \'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:active.start.liveTitle\', default: \'Switch into a workspace first - edits made in Live are not tracked by Editorial Flow.\')}')}">
                                                 <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:active.start" default="Work on this task" />
                                             </button>
                                         </f:else>

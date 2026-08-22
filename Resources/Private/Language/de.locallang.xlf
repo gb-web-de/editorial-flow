@@ -795,6 +795,18 @@
                 <source>Nothing is pending on this task in its workspace. Any work done here has since been discarded, or published from somewhere else - so there is nothing left to publish or move to another stage. Closing the task is what clears it.</source>
                 <target>In dieser Aufgabe ist in ihrem Arbeitsbereich nichts mehr offen. Was hier gearbeitet wurde, ist inzwischen verworfen oder von anderer Stelle veröffentlicht worden – es gibt also nichts mehr zu veröffentlichen oder in eine andere Phase zu verschieben. Das Schließen der Aufgabe räumt das auf.</target>
             </trans-unit>
+            <trans-unit id="active.start.title" xml:space="preserve">
+                <source>Your edits on this page will belong to this task</source>
+                <target>Deine Änderungen auf dieser Seite gehören dann zu dieser Aufgabe</target>
+            </trans-unit>
+            <trans-unit id="active.start.liveTitle" xml:space="preserve">
+                <source>Switch into a workspace first - edits made in Live are not tracked by Editorial Flow.</source>
+                <target>Wechsle zuerst in einen Arbeitsbereich – Änderungen in Live werden von Editorial Flow nicht erfasst.</target>
+            </trans-unit>
+            <trans-unit id="badge.onPageOnly" xml:space="preserve">
+                <source>on this page, not edited yet</source>
+                <target>auf dieser Seite, noch nicht bearbeitet</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>
