@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Controller;
 
+use GbWeb\EditorialFlow\Domain\Model\TaskCloseMode;
 use GbWeb\EditorialFlow\Domain\Model\TaskPriority;
 use GbWeb\EditorialFlow\Domain\Model\TaskState;
 use GbWeb\EditorialFlow\Domain\Repository\CommentRepository;
@@ -542,6 +543,28 @@ final class TaskAjaxController
                 'no-pending-versions',
                 'This record has no pending version to discard.',
                 ['table' => $table, 'uid' => $uid],
+            );
+        }
+
+        // DataHandler::discard() resolves the version through the ACTING user's
+        // workspace, and returns without a word - and without an errorLog entry -
+        // when that workspace is Live (DataHandler.php:6158-6165). Called from
+        // Live this reported a successful discard having thrown away nothing.
+        $currentWorkspace = (int)$this->getBackendUser()->workspace;
+        if ($currentWorkspace !== $workspaceUid) {
+            $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
+            return $this->reject(
+                'discard-requires-task-workspace',
+                sprintf(
+                    'Switch to workspace "%s" to discard this record\'s changes.',
+                    $titles[$workspaceUid] ?? ('#' . $workspaceUid),
+                ),
+                [
+                    'table' => $table,
+                    'uid' => $uid,
+                    'workspaceUid' => $workspaceUid,
+                    'currentWorkspace' => $currentWorkspace,
+                ],
             );
         }
 
@@ -1476,6 +1499,243 @@ final class TaskAjaxController
         return $dataHandler->errorLog === []
             ? null
             : implode(' ', array_map('strval', $dataHandler->errorLog));
+    }
+
+    /**
+     * Finish a task. Always possible - that is the whole point of this action.
+     *
+     * Until this existed, the only way a task ever closed was
+     * CloseTaskAfterPublishListener reacting to a publish. A task whose versions
+     * were discarded, or whose record was published from a different workspace,
+     * had nothing left to publish and was therefore stuck open forever: every
+     * stage move answered `no-pending-versions`, the planning columns answered
+     * `cannot-return-versioned-task-to-planning`, Done refuses drops on purpose,
+     * and there was no close and no delete. An editor could see the dead end but
+     * not leave it.
+     *
+     * So the precondition chain here is deliberately almost empty. Anything that
+     * can refuse a close recreates the trap it is meant to remove.
+     *
+     * `mode` decides only what happens to versions that are still pending, and
+     * defaults to leaving them alone - see TaskCloseMode. Handing them to another
+     * task first is the client calling `attach` before this, not a mode.
+     */
+    public function closeTaskAction(ServerRequestInterface $request): ResponseInterface
+    {
+        $body = $this->getBody($request);
+        $taskUid = (int)($body['task'] ?? 0);
+
+        $task = $this->findOpenTaskOrError($taskUid, 'close it');
+        if ($task instanceof ResponseInterface) {
+            return $task;
+        }
+
+        $mode = TaskCloseMode::fromRequest($body['mode'] ?? null);
+        if ($mode === null) {
+            return $this->reject(
+                'unknown-close-mode',
+                'That is not a way to close a task.',
+                ['taskUid' => $taskUid, 'mode' => (string)($body['mode'] ?? '')],
+            );
+        }
+
+        $readError = $this->assertMayReadPage((int)$task['subject_pid']);
+        if ($readError !== null) {
+            // Read access to the page is the bar, not assertMayEdit() on the
+            // subject: a task whose subject record was deleted answers
+            // `record-not-found` there and would be unclosable forever, which is
+            // exactly the state this action exists to end. A page that no longer
+            // resolves at all is the same argument one level up - close it and
+            // leave a trace, rather than stranding the row.
+            if ($readError->code !== 'page-not-found' && $readError->code !== 'missing-page-uid') {
+                return $this->error($readError);
+            }
+            $this->logger->notice('close-orphan-task', [
+                'taskUid' => $taskUid,
+                'subjectPid' => (int)$task['subject_pid'],
+                'reason' => $readError->code,
+                'beUser' => (int)($this->getBackendUser()->user['uid'] ?? 0),
+            ]);
+        }
+
+        $workspaceUid = (int)$task['workspace_uid'];
+        $pending = $this->memberSynchronizer->findPendingVersionPairsByTable($taskUid, $workspaceUid);
+
+        $discarded = [];
+        if ($mode === TaskCloseMode::DISCARD && $pending !== []) {
+            $refusal = $this->discardPendingVersions($taskUid, $workspaceUid, $pending);
+            if ($refusal instanceof ResponseInterface) {
+                return $refusal;
+            }
+            $discarded = $refusal;
+            $pending = [];
+        }
+
+        $beUserId = (int)($this->getBackendUser()->user['uid'] ?? 0);
+        $this->taskRepository->close($taskUid, $beUserId);
+
+        // keptPending is the reason this payload exists. mode=keep leaves
+        // versions in the workspace that no open task claims any more; without
+        // recording them here, the only trace of them would be in the Workspaces
+        // module, and the archive would imply the task took everything with it.
+        $this->activityLogger->log($taskUid, ActivityLogger::EVENT_CLOSED, $beUserId, [
+            'reason' => 'manual',
+            'mode' => $mode->value,
+            'workspaceId' => $workspaceUid,
+            'discarded' => $discarded,
+            'keptPending' => $this->describePendingPairs($pending),
+        ]);
+
+        return new JsonResponse([
+            'success' => true,
+            'taskUid' => $taskUid,
+            'closed' => true,
+            'mode' => $mode->value,
+            'discarded' => count($discarded),
+            'keptPending' => count($this->describePendingPairs($pending)),
+        ]);
+    }
+
+    /**
+     * Throw away every pending version of a task, or refuse without writing.
+     *
+     * Three guards, and each one earns its place:
+     *
+     * The workspace check is not a permission nicety. DataHandler::discard()
+     * returns without doing anything at all when the acting user sits in Live
+     * (DataHandler.php:6158-6165) and, separately, refuses when the user's
+     * workspace differs from the version's. The first of those leaves NO entry
+     * in errorLog, so "core accepted it" is indistinguishable from "core ignored
+     * it" - a caller trusting an empty errorLog would report a successful
+     * discard having destroyed nothing, and then close the task on top of it.
+     *
+     * Permissions are checked for every record before any of them is touched.
+     * attachAction reports per-record results because a partly-attached task is
+     * still coherent; a partly-discarded one is not, so this is all-or-nothing.
+     *
+     * The re-read afterwards is the answer to the silent-return problem above:
+     * the only trustworthy proof that the versions are gone is that they are
+     * gone.
+     *
+     * @param array<string, list<array{live: int, version: int}>> $pending
+     * @return ResponseInterface|list<array{table: string, uid: int, title: string}> the refusal, or what was discarded
+     */
+    private function discardPendingVersions(int $taskUid, int $workspaceUid, array $pending): ResponseInterface|array
+    {
+        $currentWorkspace = (int)$this->getBackendUser()->workspace;
+        if ($workspaceUid < 1 || $currentWorkspace !== $workspaceUid) {
+            $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
+            return $this->reject(
+                'close-requires-task-workspace',
+                sprintf(
+                    'Switch to workspace "%s" to discard these changes, or close the task and leave them pending.',
+                    $titles[$workspaceUid] ?? ('#' . $workspaceUid),
+                ),
+                ['taskUid' => $taskUid, 'workspaceUid' => $workspaceUid, 'currentWorkspace' => $currentWorkspace],
+            );
+        }
+
+        $refused = [];
+        foreach ($pending as $table => $pairs) {
+            foreach ($pairs as $pair) {
+                $error = $this->assertMayEdit($table, $pair['live']);
+                if ($error !== null) {
+                    $refused[] = ['table' => $table, 'uid' => $pair['live']] + $this->logAndExposeError($error);
+                }
+            }
+        }
+        if ($refused !== []) {
+            return new JsonResponse([
+                'success' => false,
+                'code' => 'discard-refused',
+                'message' => 'Some of these changes cannot be discarded, so nothing was discarded and the task stays open.',
+                'refused' => $refused,
+            ], 400);
+        }
+
+        $describing = $this->describePendingPairs($pending);
+
+        $cmd = [];
+        foreach ($pending as $table => $pairs) {
+            foreach ($pairs as $pair) {
+                // Keyed by the live uid, which is what membership rows hold;
+                // discard() resolves it to the version itself. Same reasoning as
+                // discardMemberAction().
+                $cmd[$table][$pair['live']]['discard'] = true;
+            }
+        }
+
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start([], $cmd);
+        $dataHandler->process_cmdmap();
+
+        if ($dataHandler->errorLog !== []) {
+            $this->logger->warning('core-refused-discard', [
+                'taskUid' => $taskUid,
+                'workspaceUid' => $workspaceUid,
+                'errors' => $dataHandler->errorLog,
+                'beUser' => (int)($this->getBackendUser()->user['uid'] ?? 0),
+            ]);
+            return new JsonResponse([
+                'success' => false,
+                'code' => 'core-refused-discard',
+                'message' => implode(' ', array_map('strval', $dataHandler->errorLog)),
+            ], 400);
+        }
+
+        $survivors = $this->memberSynchronizer->findPendingVersionPairsByTable($taskUid, $workspaceUid);
+        if ($survivors !== []) {
+            $this->logger->warning('discard-incomplete', [
+                'taskUid' => $taskUid,
+                'workspaceUid' => $workspaceUid,
+                'survivors' => $this->describePendingPairs($survivors),
+                'beUser' => (int)($this->getBackendUser()->user['uid'] ?? 0),
+            ]);
+            return new JsonResponse([
+                'success' => false,
+                'code' => 'discard-incomplete',
+                'message' => 'TYPO3 did not discard all of these changes, so the task stays open.',
+                'refused' => $this->describePendingPairs($survivors),
+            ], 400);
+        }
+
+        $beUserId = (int)($this->getBackendUser()->user['uid'] ?? 0);
+        foreach ($describing as $record) {
+            $this->activityLogger->log($taskUid, ActivityLogger::EVENT_DISCARDED, $beUserId, [
+                'table' => $record['table'],
+                'uid' => $record['uid'],
+            ]);
+        }
+
+        return $describing;
+    }
+
+    /**
+     * Name the records behind a pending-pair map, for the activity trail and for
+     * the client. Titles are resolved from the LIVE record: the version may be
+     * about to disappear, and "Intro text" is what the editor recognises either
+     * way.
+     *
+     * @param array<string, list<array{live: int, version: int}>> $pending
+     * @return list<array{table: string, uid: int, title: string}>
+     */
+    private function describePendingPairs(array $pending): array
+    {
+        $described = [];
+        foreach ($pending as $table => $pairs) {
+            foreach ($pairs as $pair) {
+                $record = BackendUtility::getRecord($table, $pair['live']);
+                $described[] = [
+                    'table' => $table,
+                    'uid' => $pair['live'],
+                    'title' => $record !== null
+                        ? BackendUtility::getRecordTitle($table, $record)
+                        : sprintf('%s:%d', $table, $pair['live']),
+                ];
+            }
+        }
+
+        return $described;
     }
 
     /**

@@ -138,6 +138,14 @@ return [
         'path' => '/editorialflow/task/publish',
         'target' => TaskAjaxController::class . '::publishTaskAction',
     ],
+    // Finish a task. Separate from publishing on purpose: a task can be over
+    // without anything of it going live from here - discarded, published from
+    // another workspace, or simply abandoned - and until this route existed
+    // those tasks could never be closed at all.
+    'editorialflow_task_close' => [
+        'path' => '/editorialflow/task/close',
+        'target' => TaskAjaxController::class . '::closeTaskAction',
+    ],
     // Post-Save Task Routing Wizard session check - submission itself goes
     // through TYPO3 core's generic wizard_submit route (mode=editorialflow_task_wizard),
     // see Classes/Wizard/TaskWizardProvider.php.
