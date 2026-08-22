@@ -146,6 +146,13 @@ return [
         'path' => '/editorialflow/task/close',
         'target' => TaskAjaxController::class . '::closeTaskAction',
     ],
+    // What the close dialog shows before an editor commits: which records still
+    // have unpublished changes, which fields those are, and where they could be
+    // handed to instead of being discarded.
+    'editorialflow_task_close_preview' => [
+        'path' => '/editorialflow/task/close-preview',
+        'target' => TaskAjaxController::class . '::closePreviewAction',
+    ],
     // Post-Save Task Routing Wizard session check - submission itself goes
     // through TYPO3 core's generic wizard_submit route (mode=editorialflow_task_wizard),
     // see Classes/Wizard/TaskWizardProvider.php.

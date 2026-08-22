@@ -370,4 +370,99 @@ final class TaskCloseActionTest extends FunctionalTestCase
         self::assertTrue($payload['success']);
         self::assertSame(1, (int)$this->taskRow($taskUid)['closed']);
     }
+
+    /**
+     * @param array<string, mixed> $query
+     */
+    private function getRequest(array $query): ServerRequestInterface
+    {
+        return (new ServerRequest())->withQueryParams($query);
+    }
+
+    /**
+     * The dialog has to name what is at stake, not just that something is. An
+     * editor choosing between keeping and discarding needs the record and the
+     * fields, otherwise the choice is blind.
+     */
+    #[Test]
+    public function thePreviewNamesEachPendingRecordAndWhichFieldsChanged(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 'tt_content', 10);
+        $this->editInWorkspace('tt_content', 10, ['header' => 'Intro (draft)']);
+
+        $payload = $this->decode($this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid])));
+
+        self::assertTrue($payload['success']);
+        self::assertSame('Editorial', $payload['task']['workspaceTitle']);
+        self::assertCount(1, $payload['pending']);
+        self::assertSame('tt_content', $payload['pending'][0]['table']);
+        self::assertSame(10, $payload['pending'][0]['uid']);
+        self::assertSame('Intro text', $payload['pending'][0]['title'], 'the LIVE title - the version is about to go');
+        self::assertContains('Header', $payload['pending'][0]['changes']);
+        self::assertSame(1, $payload['pending'][0]['changeCount']);
+        self::assertTrue($payload['canDiscard']);
+        self::assertSame('', $payload['discardBlockedReason']);
+    }
+
+    #[Test]
+    public function aTaskWithNothingPendingPreviewsAsEmpty(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 'tt_content', 10);
+
+        $payload = $this->decode($this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid])));
+
+        self::assertTrue($payload['success']);
+        self::assertSame([], $payload['pending']);
+        self::assertFalse($payload['canDiscard'], 'nothing to discard is not the same as discarding nothing');
+    }
+
+    /**
+     * The dialog greys the discard option out rather than letting an editor pick
+     * something the POST is certain to refuse.
+     */
+    #[Test]
+    public function thePreviewSaysWhyDiscardingIsUnavailableFromLive(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 'tt_content', 10);
+        $this->editInWorkspace('tt_content', 10, ['header' => 'Intro (draft)']);
+
+        $GLOBALS['BE_USER']->setWorkspace(0);
+        $payload = $this->decode($this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid])));
+
+        self::assertFalse($payload['canDiscard']);
+        self::assertStringContainsString('Editorial', $payload['discardBlockedReason']);
+    }
+
+    /**
+     * Handover targets and the move picker have to agree, so both go through
+     * openTaskCandidatesAround() and both apply attachAction()'s workspace rule.
+     */
+    #[Test]
+    public function handoverTargetsExcludeTheTaskItselfAndForeignWorkspaces(): void
+    {
+        $taskUid = $this->createTask();
+        $sibling = $this->createTask(['title' => 'Campaign']);
+        $foreign = $this->createTask(['title' => 'Legal review', 'workspace_uid' => 2]);
+
+        $payload = $this->decode($this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid])));
+
+        $offered = array_column($payload['handoverTargets'], 'uid');
+        self::assertContains($sibling, $offered);
+        self::assertNotContains($taskUid, $offered, 'a task cannot hand its records to itself');
+        self::assertNotContains($foreign, $offered, 'attach would refuse a task in another workspace');
+    }
+
+    #[Test]
+    public function previewingAClosedTaskSaysSo(): void
+    {
+        $taskUid = $this->createTask(['closed' => 1, 'state' => 'done']);
+
+        $response = $this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid]));
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('task-closed', $this->decode($response)['code']);
+    }
 }

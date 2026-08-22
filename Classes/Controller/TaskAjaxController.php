@@ -397,22 +397,50 @@ final class TaskAjaxController
             );
         }
 
-        $workspaceUid = (int)$this->getBackendUser()->workspace;
         $currentTaskUid = (int)$current['uid'];
+        $tasks = $this->openTaskCandidatesAround(
+            $this->derivePid($table, $uid),
+            (int)$current['subject_pid'],
+            $currentTaskUid,
+        );
+
+        return new JsonResponse([
+            'success' => true,
+            'currentTask' => $currentTaskUid,
+            'currentTaskTitle' => (string)$current['title'],
+            'tasks' => array_values($tasks),
+        ]);
+    }
+
+    /**
+     * The open tasks a record could reasonably be handed to.
+     *
+     * Both the record's own page and the current task's subject page, because
+     * the two differ exactly when an editor changed content belonging elsewhere
+     * - which is the case where "give this to another task" is most needed.
+     *
+     * Shared by moveTargetsAction() and closePreviewAction() so the picker and
+     * the close dialog can never offer different targets. The workspace filter
+     * is the same rule attachAction() enforces on the way in: nothing is offered
+     * that the write endpoint would refuse.
+     *
+     * @return array<int, array{uid: int, title: string, state: string, stageLabel: string}>
+     */
+    private function openTaskCandidatesAround(int $recordPid, int $subjectPid, int $excludeTaskUid): array
+    {
+        $workspaceUid = (int)$this->getBackendUser()->workspace;
 
         $candidates = array_merge(
-            $this->taskRepository->findAllOpenForPage($this->derivePid($table, $uid)),
-            $this->taskRepository->findAllOpenForPage((int)$current['subject_pid']),
+            $this->taskRepository->findAllOpenForPage($recordPid),
+            $this->taskRepository->findAllOpenForPage($subjectPid),
         );
 
         $tasks = [];
         foreach ($candidates as $candidate) {
             $candidateUid = (int)$candidate['uid'];
-            if ($candidateUid === $currentTaskUid || isset($tasks[$candidateUid])) {
+            if ($candidateUid === $excludeTaskUid || isset($tasks[$candidateUid])) {
                 continue;
             }
-            // Same rule attachAction() enforces on the way in, applied here so
-            // the picker never offers a target the write endpoint would refuse.
             $candidateWorkspaceUid = (int)$candidate['workspace_uid'];
             if ($candidateWorkspaceUid !== 0 && $candidateWorkspaceUid !== $workspaceUid) {
                 continue;
@@ -426,11 +454,89 @@ final class TaskAjaxController
             ];
         }
 
+        return $tasks;
+    }
+
+    /**
+     * Everything the close dialog has to show before an editor decides.
+     *
+     * Closing is irreversible for the task and, in discard mode, for the
+     * content. "This task still has unpublished changes" is not enough to
+     * decide on - the dialog names each record and which of its fields changed,
+     * so the choice between keeping, handing over and discarding is made
+     * against what is actually at stake.
+     *
+     * The change labels come from WorkspaceIntegrationService::getRecordDiffs(),
+     * the same renderer the ticket's Changes section uses, so the two surfaces
+     * cannot describe the same version differently.
+     */
+    public function closePreviewAction(ServerRequestInterface $request): ResponseInterface
+    {
+        $taskUid = (int)($request->getQueryParams()['task'] ?? 0);
+
+        $task = $this->findOpenTaskOrError($taskUid, 'close it');
+        if ($task instanceof ResponseInterface) {
+            return $task;
+        }
+
+        $workspaceUid = (int)$task['workspace_uid'];
+        $currentWorkspace = (int)$this->getBackendUser()->workspace;
+        $workspaceTitles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
+        $workspaceTitle = $workspaceUid > 0 ? ($workspaceTitles[$workspaceUid] ?? ('#' . $workspaceUid)) : '';
+
+        $pending = [];
+        foreach ($this->memberSynchronizer->findPendingVersionPairsByTable($taskUid, $workspaceUid) as $table => $pairs) {
+            foreach ($pairs as $pair) {
+                $record = BackendUtility::getRecord($table, $pair['live']);
+                // Capped, with the true count alongside: a version with forty
+                // changed fields must not turn the dialog into a scroll region,
+                // but "and 35 more" is information the editor needs.
+                $labels = array_values(array_unique(array_filter(array_map(
+                    static fn (array $diff): string => (string)$diff['label'],
+                    $this->workspaceService->getRecordDiffs($table, $pair['version']),
+                ))));
+
+                $pending[] = [
+                    'table' => $table,
+                    'uid' => $pair['live'],
+                    'versionUid' => $pair['version'],
+                    'title' => $record !== null
+                        ? BackendUtility::getRecordTitle($table, $record)
+                        : sprintf('%s:%d', $table, $pair['live']),
+                    'changes' => array_slice($labels, 0, 5),
+                    'changeCount' => count($labels),
+                ];
+            }
+        }
+
+        // Answered here rather than left for the POST to refuse, so the dialog
+        // can grey the option out and say why instead of letting an editor pick
+        // something that is going to fail.
+        $canDiscard = $pending !== [] && $workspaceUid > 0 && $currentWorkspace === $workspaceUid;
+        $discardBlockedReason = '';
+        if ($pending !== [] && !$canDiscard) {
+            $discardBlockedReason = sprintf(
+                'Switch to workspace "%s" to discard these changes.',
+                $workspaceTitle !== '' ? $workspaceTitle : ('#' . $workspaceUid),
+            );
+        }
+
         return new JsonResponse([
             'success' => true,
-            'currentTask' => $currentTaskUid,
-            'currentTaskTitle' => (string)$current['title'],
-            'tasks' => array_values($tasks),
+            'task' => [
+                'uid' => $taskUid,
+                'title' => (string)$task['title'],
+                'workspaceUid' => $workspaceUid,
+                'workspaceTitle' => $workspaceTitle,
+            ],
+            'canDiscard' => $canDiscard,
+            'discardBlockedReason' => $discardBlockedReason,
+            'pending' => $pending,
+            'handoverTargets' => array_values($this->openTaskCandidatesAround(
+                (int)$task['subject_pid'],
+                (int)$task['subject_pid'],
+                $taskUid,
+            )),
         ]);
     }
 
