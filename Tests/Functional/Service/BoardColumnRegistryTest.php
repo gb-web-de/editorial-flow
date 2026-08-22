@@ -207,4 +207,69 @@ final class BoardColumnRegistryTest extends FunctionalTestCase
             self::assertStringContainsString('Team ' . $workspaceUid, $editing['contributingWorkspaceTitles']);
         }
     }
+
+    /**
+     * Which column a card lands in.
+     *
+     * The rule was private in EditorialFlowController and therefore untested:
+     * the board render test hand-builds its columns, so it never ran this at
+     * all. That is why the closed-task placement below - the one thing an editor
+     * notices immediately - had no coverage.
+     */
+    #[Test]
+    public function aClosedTaskBelongsInDoneAndNowhereElse(): void
+    {
+        $columns = $this->subject()->getColumns($GLOBALS['BE_USER'], 1, []);
+        // A task closed out of the Editing stage: close() keeps the workspace it
+        // was finished in, so stage_uid 0 still matches the Editing column's
+        // shape and only the `closed` short-circuit keeps it out.
+        $task = ['closed' => 1, 'state' => 'done', 'workspace_uid' => 1, 'stage_uid' => 0];
+
+        $matched = array_values(array_filter(
+            array_map(
+                fn (array $column): ?string => $this->subject()->belongsInColumn($task, $column)
+                    ? (string)$column['key']
+                    : null,
+                $columns,
+            ),
+        ));
+
+        self::assertSame(['done'], $matched);
+    }
+
+    #[Test]
+    public function anOpenTaskInAStageBelongsToThatStagesColumn(): void
+    {
+        $columns = $this->subject()->getColumns($GLOBALS['BE_USER'], 1, []);
+        $task = ['closed' => 0, 'state' => 'in_progress', 'workspace_uid' => 1, 'stage_uid' => 0];
+
+        $matched = array_values(array_filter(
+            array_map(
+                fn (array $column): ?string => $this->subject()->belongsInColumn($task, $column)
+                    ? (string)$column['key']
+                    : null,
+                $columns,
+            ),
+        ));
+
+        self::assertSame(['stage-0'], $matched);
+    }
+
+    #[Test]
+    public function anUnversionedTaskBelongsToItsOwnStateColumn(): void
+    {
+        $columns = $this->subject()->getColumns($GLOBALS['BE_USER'], 1, []);
+        $task = ['closed' => 0, 'state' => 'planned', 'workspace_uid' => 0, 'stage_uid' => 0];
+
+        $matched = array_values(array_filter(
+            array_map(
+                fn (array $column): ?string => $this->subject()->belongsInColumn($task, $column)
+                    ? (string)$column['key']
+                    : null,
+                $columns,
+            ),
+        ));
+
+        self::assertSame(['planned'], $matched);
+    }
 }

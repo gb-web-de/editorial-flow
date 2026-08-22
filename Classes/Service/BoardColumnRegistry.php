@@ -90,7 +90,7 @@ final class BoardColumnRegistry
      * and it is what the board is asked to merge on.
      *
      * A column's color is a fact about which workspaces contribute to it, not a
-     * per-card detail (EditorialFlowController::belongsInColumn() still knows which
+     * per-card detail (belongsInColumn() below still knows which
      * task belongs where):
      *   - only $workspaceUid contributes -> uncoloured, exactly like before this
      *     merge existed at all - nothing to compare, nothing to say.
@@ -194,7 +194,7 @@ final class BoardColumnRegistry
             'state' => $ownStageUid !== null ? TaskState::fromStageId($ownStageUid)->value : 'foreign_stage',
             'stageUid' => $ownStageUid,
             // Every contributing workspace's own stage uid for this merged step -
-            // EditorialFlowController::belongsInColumn() matches a task against its
+            // belongsInColumn() matches a task against its
             // own workspace's entry here, not against the scalar stageUid above
             // (which only ever names the active workspace's stage).
             'stageUidByWorkspace' => $group['stageUidByWorkspace'],
@@ -305,6 +305,52 @@ final class BoardColumnRegistry
             'contributingWorkspaceTitles' => '',
             'contributingWorkspaceCount' => 0,
         ];
+    }
+
+    /**
+     * Which column does this task belong in?
+     *
+     * Lives here rather than in the controller because the answer is read
+     * entirely out of the column shapes this class builds - `stageUidByWorkspace`
+     * is its invention, and a rule that reads it belongs next to the code that
+     * writes it. It was private in EditorialFlowController, which also made it
+     * untestable: the only coverage was rendering a board with hand-built
+     * columns, which never ran this at all.
+     *
+     * A versioned task (workspace_uid > 0, whether the active workspace or one of
+     * the other ones merged into the board - see BoardColumnRegistry) belongs to
+     * the merged column whose stageUidByWorkspace entry for its own workspace
+     * matches its own stage_uid. An unversioned task belongs to the column of its
+     * Editorial Flow state instead, and only ever to one from the active workspace
+     * (or none) - a foreign workspace never owns a Backlog/Planned/Done task,
+     * since those states only exist before/after a workspace version does.
+     *
+     * @param array<string, mixed> $task
+     * @param array<string, mixed> $column
+     */
+    public function belongsInColumn(array $task, array $column): bool
+    {
+        // A closed task is in Done because it is closed. Checked first and on
+        // its own: close() keeps the workspace the task was finished in (that
+        // uid is the only key into its sys_history trail), so without this a
+        // closed task with stage_uid 0 would also match the Editing stage
+        // column and appear twice on the board.
+        if ((int)($task['closed'] ?? 0) === 1) {
+            return ($column['stageUidByWorkspace'] ?? null) === null
+                && $column['state'] === TaskState::DONE->value;
+        }
+
+        $stageUidByWorkspace = $column['stageUidByWorkspace'] ?? null;
+        if ($stageUidByWorkspace !== null) {
+            $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);
+            if ($taskWorkspaceUid < 1) {
+                return false;
+            }
+            return ($stageUidByWorkspace[$taskWorkspaceUid] ?? null) === (int)($task['stage_uid'] ?? 0);
+        }
+
+        return (int)($task['workspace_uid'] ?? 0) === 0
+            && (string)($task['state'] ?? '') === $column['state'];
     }
 
     private function resolveWorkspaceTitle(int $workspaceUid): string

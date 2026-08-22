@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Controller;
 
-use GbWeb\EditorialFlow\Domain\Model\TaskState;
 use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
 use GbWeb\EditorialFlow\Service\ActiveTaskSession;
 use GbWeb\EditorialFlow\Service\AssignableUserProvider;
@@ -265,7 +264,7 @@ final class EditorialFlowController extends ActionController
             // active workspace: meaningless to act on from here (stage/publish
             // permissions below are all scoped to the active workspace), so it is
             // shown read-only in the "Other workspaces" column instead - see
-            // BoardColumnRegistry::getColumns() and belongsInColumn().
+            // BoardColumnRegistry::getColumns() and its belongsInColumn().
             //
             // A CLOSED task is never foreign, whatever workspace it was finished
             // in. close() keeps that uid now, so without this every archived
@@ -307,7 +306,7 @@ final class EditorialFlowController extends ActionController
         foreach ($columns as $column) {
             $column['cards'] = [];
             foreach ($enrichedTasks as $task) {
-                if ($this->belongsInColumn($task, $column)) {
+                if ($this->boardColumnRegistry->belongsInColumn($task, $column)) {
                     $column['cards'][] = $task;
                 }
             }
@@ -340,42 +339,6 @@ final class EditorialFlowController extends ActionController
         return $this->conflictDetector->findConflictsForTasks($membersByTask, $taskWorkspaceUids);
     }
 
-    /**
-     * A versioned task (workspace_uid > 0, whether the active workspace or one of
-     * the other ones merged into the board - see BoardColumnRegistry) belongs to
-     * the merged column whose stageUidByWorkspace entry for its own workspace
-     * matches its own stage_uid. An unversioned task belongs to the column of its
-     * Editorial Flow state instead, and only ever to one from the active workspace
-     * (or none) - a foreign workspace never owns a Backlog/Planned/Done task,
-     * since those states only exist before/after a workspace version does.
-     *
-     * @param array<string, mixed> $task
-     * @param array<string, mixed> $column
-     */
-    private function belongsInColumn(array $task, array $column): bool
-    {
-        // A closed task is in Done because it is closed. Checked first and on
-        // its own: close() keeps the workspace the task was finished in (that
-        // uid is the only key into its sys_history trail), so without this a
-        // closed task with stage_uid 0 would also match the Editing stage
-        // column and appear twice on the board.
-        if ((int)($task['closed'] ?? 0) === 1) {
-            return ($column['stageUidByWorkspace'] ?? null) === null
-                && $column['state'] === TaskState::DONE->value;
-        }
-
-        $stageUidByWorkspace = $column['stageUidByWorkspace'] ?? null;
-        if ($stageUidByWorkspace !== null) {
-            $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);
-            if ($taskWorkspaceUid < 1) {
-                return false;
-            }
-            return ($stageUidByWorkspace[$taskWorkspaceUid] ?? null) === (int)($task['stage_uid'] ?? 0);
-        }
-
-        return (int)($task['workspace_uid'] ?? 0) === 0
-            && (string)($task['state'] ?? '') === $column['state'];
-    }
 
     /**
      * The title of a page as the current workspace sees it.
