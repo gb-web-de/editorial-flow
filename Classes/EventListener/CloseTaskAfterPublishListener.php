@@ -48,14 +48,41 @@ final class CloseTaskAfterPublishListener
         }
 
         $taskUid = (int)$task['uid'];
+        $taskWorkspaceUid = (int)$task['workspace_uid'];
         $beUserId = (int)($this->getBackendUser()?->user['uid'] ?? 0);
 
-        if ($this->memberSynchronizer->hasPendingVersions($taskUid, $event->getWorkspaceId())) {
-            // Part of the task went live, the rest has not. Record it and wait.
+        // Whose publish was this?
+        //
+        // findOpenTaskByMember() is not workspace-filtered, and core lets the
+        // same live record be versioned in several workspaces at once - that is
+        // WorkspaceConflictDetector's entire reason for existing. So when
+        // workspace B publishes a record whose open task belongs to workspace A,
+        // this listener still finds task A. Asking "is anything pending in B?"
+        // then gets `false` for a reason that has nothing to do with A, and task
+        // A was closed while its own version was still sitting in review.
+        //
+        // The task's own workspace is the only one that can answer whether the
+        // task is finished. A task that never entered Editing has none, and
+        // there the event's workspace is the only information available.
+        if ($taskWorkspaceUid > 0 && $taskWorkspaceUid !== $event->getWorkspaceId()) {
             $this->activityLogger->log($taskUid, ActivityLogger::EVENT_PUBLISHED, $beUserId, [
                 'table' => $event->getTable(),
                 'liveUid' => $event->getRecordId(),
                 'workspaceId' => $event->getWorkspaceId(),
+                'taskWorkspaceId' => $taskWorkspaceUid,
+                'taskComplete' => false,
+            ]);
+            return;
+        }
+
+        $workspaceUid = $taskWorkspaceUid > 0 ? $taskWorkspaceUid : $event->getWorkspaceId();
+
+        if ($this->memberSynchronizer->hasPendingVersions($taskUid, $workspaceUid)) {
+            // Part of the task went live, the rest has not. Record it and wait.
+            $this->activityLogger->log($taskUid, ActivityLogger::EVENT_PUBLISHED, $beUserId, [
+                'table' => $event->getTable(),
+                'liveUid' => $event->getRecordId(),
+                'workspaceId' => $workspaceUid,
                 'taskComplete' => false,
             ]);
             return;
@@ -63,7 +90,7 @@ final class CloseTaskAfterPublishListener
 
         $this->taskRepository->close($taskUid, $beUserId);
         $this->activityLogger->log($taskUid, ActivityLogger::EVENT_CLOSED, $beUserId, [
-            'workspaceId' => $event->getWorkspaceId(),
+            'workspaceId' => $workspaceUid,
             // Kept so the archived task can still find its trail: after publishing,
             // core has re-pointed the version's sys_history rows at these live uids.
             'table' => $event->getTable(),
