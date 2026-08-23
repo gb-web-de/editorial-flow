@@ -41,6 +41,12 @@ final class StageTransitionService
      * @param array<string, mixed> $task the task row being transitioned
      * @param array<string, list<int>> $versionsByTable table => version uids to move
      * @param list<mixed> $recipients
+     * @param string|null $acceptanceRecord what the stage being left asked for and
+     *        what was answered, composed by the caller that asked the question
+     *        (TaskAjaxController::buildAcceptanceRecord()). Null where nobody was
+     *        asked - the stage has no criteria, or the transition is automatic,
+     *        as in TaskAutoCreationService's regression back to Editing. Recording
+     *        a confirmation nobody gave would be worse than recording nothing.
      * @return string|null the refusal reason, or null when core accepted
      */
     public function transition(
@@ -50,13 +56,22 @@ final class StageTransitionService
         int $beUserId,
         string $comment = '',
         array $recipients = [],
+        ?string $acceptanceRecord = null,
     ): ?string {
         $refusal = $this->askCoreToSetStage($versionsByTable, $targetStageUid, $comment, $recipients);
         if ($refusal !== null) {
             return $refusal;
         }
 
-        $this->recordStageChange($task, $targetStageUid, $comment, $recipients, $versionsByTable, $beUserId);
+        $this->recordStageChange(
+            $task,
+            $targetStageUid,
+            $comment,
+            $recipients,
+            $versionsByTable,
+            $beUserId,
+            $acceptanceRecord,
+        );
 
         return null;
     }
@@ -106,6 +121,7 @@ final class StageTransitionService
         array $recipients,
         array $versionsByTable,
         int $beUserId,
+        ?string $acceptanceRecord = null,
     ): void {
         $taskUid = (int)$task['uid'];
         $targetState = TaskState::fromStageId($targetStageUid);
@@ -122,6 +138,14 @@ final class StageTransitionService
 
         if ($comment !== '') {
             $this->commentRepository->add($taskUid, $comment, $beUserId, $activityUid);
+        }
+
+        // Its own comment rather than appended to the editor's: the timeline
+        // nests every comment anchored to the same activity under it, so both
+        // arrive in the right place, and what the editor wrote stays theirs to
+        // edit without an auto-generated block glued to the end of it.
+        if ($acceptanceRecord !== null) {
+            $this->commentRepository->add($taskUid, $acceptanceRecord, $beUserId, $activityUid);
         }
     }
 

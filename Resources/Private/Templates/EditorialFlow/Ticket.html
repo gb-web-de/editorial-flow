@@ -240,13 +240,16 @@
 
     <f:if condition="{checklist -> f:count()} > 0">
         <section class="editorialflow-ticket-section">
-            <h3>Review checklist</h3>
+            <h3><f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:criteria.field" default="Acceptance criteria" /></h3>
             <f:comment>
-                Only rendered once the task has entered a stage with a
-                configured checklist - see
-                WorkspaceIntegrationService::getTaskDetails(). Not gated by
-                canManageChecklist: filling this in is editorial work done
-                while passing through the stage, not workspace policy.
+                Only rendered once the task has entered a stage that asks for
+                criteria - see WorkspaceIntegrationService::getTaskDetails().
+                Not gated by canManageChecklist: confirming these is editorial
+                work done while passing through the stage, not workspace policy.
+
+                The same criteria are asked again in the "Send to stage" dialog,
+                because that is the moment they are about. This is where they can
+                be answered while the work is still going on.
             </f:comment>
             <ul class="editorialflow-checklist">
                 <f:for each="{checklist}" as="item">
@@ -301,12 +304,38 @@
                                 </div>
                             </f:if>
 
+                            <f:comment>
+                                One confirmed (or withdrawn) acceptance criterion.
+                                The event carries the title in its payload rather
+                                than a pointer, so the entry still reads correctly
+                                after the criterion itself has been removed from
+                                the stage - which is the whole point of writing it
+                                down when it happened.
+                            </f:comment>
+                            <f:if condition="{entry.event} == 'checklist_checked'">
+                                <div class="editorialflow-timeline-criterion">
+                                    <f:if condition="{entry.payload.checked}">
+                                        <f:then><span aria-hidden="true">&#10003;</span></f:then>
+                                        <f:else><span aria-hidden="true">&#8213;</span></f:else>
+                                    </f:if>
+                                    {entry.payload.title}
+                                </div>
+                            </f:if>
+
+                            <f:comment>
+                                nl2br because the acceptance record
+                                (TaskAjaxController::buildAcceptanceRecord()) is a
+                                list written as lines, and so is many an editor's
+                                comment. Children are still escaped - the
+                                ViewHelper only turns the newlines that survive
+                                that into breaks.
+                            </f:comment>
                             <f:if condition="{entry.content}">
-                                <blockquote class="editorialflow-timeline-comment">{entry.content}</blockquote>
+                                <blockquote class="editorialflow-timeline-comment"><f:format.nl2br>{entry.content}</f:format.nl2br></blockquote>
                             </f:if>
 
                             <f:for each="{entry.comments}" as="comment">
-                                <blockquote class="editorialflow-timeline-comment">{comment.content}</blockquote>
+                                <blockquote class="editorialflow-timeline-comment"><f:format.nl2br>{comment.content}</f:format.nl2br></blockquote>
                             </f:for>
                         </li>
                     </f:for>

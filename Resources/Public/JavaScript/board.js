@@ -38,6 +38,7 @@ import { registerConflictDiffButtons } from '@gb-web/editorial-flow/task/conflic
 import { registerCloseActions, openCloseDialog } from '@gb-web/editorial-flow/task/close.js';
 import { notifyRefusal } from '@gb-web/editorial-flow/task/refusal.js';
 import { registerChecklistManagement, registerChecklistManageActions, registerChecklistToggle } from '@gb-web/editorial-flow/board/checklist.js';
+import { appendAcceptanceCriteria, confirmIncompleteCriteria } from '@gb-web/editorial-flow/board/criteria.js';
 
 /*
  * Core's own "Editing" stage (StagesService::STAGE_EDIT_ID), the one a record
@@ -253,8 +254,10 @@ class EditorialFlowBoard {
       // send to a review stage, and the dialog would only ever come back with
       // executeStageAction()'s `no-pending-versions` rejection. Refusing here
       // matches every other drop rule in getDropRejectionMessage() instead of
-      // opening a dialog that cannot succeed.
-      if (await this.hasNothingPendingForStageTransition(taskUid)) {
+      // opening a dialog that cannot succeed. The same round trip brings back
+      // the acceptance criteria the dialog has to ask about.
+      const eligibility = await this.checkStageTransition(taskUid);
+      if (eligibility.hasPending === false) {
         const message = `${cardTitle} has nothing pending in this workspace yet, so it cannot be sent to a review stage.`;
         Notification.warning('Editorial Flow', message);
         this.announce(message);
@@ -267,6 +270,7 @@ class EditorialFlowBoard {
         columnTitle,
         cardTitle,
         card?.dataset.editorialflowActive === 'true' && targetStageUid !== EDITING_STAGE_UID,
+        eligibility.criteria,
       );
       return;
     }
@@ -275,21 +279,33 @@ class EditorialFlowBoard {
   }
 
   /*
-   * True only when the server confirms there is nothing pending - any check
-   * failure (missing route, network error, task already gone) falls back to
-   * false so the existing dialog-and-submit path still runs and reports its
-   * own, more specific error, rather than silently swallowing the drop here.
+   * What the server says about this transition before the dialog opens:
+   * whether anything is pending, and which acceptance criteria the stage being
+   * left asks for.
+   *
+   * Any check failure (missing route, network error, task already gone) answers
+   * "pending, no criteria" so the existing dialog-and-submit path still runs and
+   * reports its own, more specific error rather than a drop silently swallowed
+   * here. The criteria are asked for again server-side at submit time, so
+   * losing them here weakens the prompt, never the rule.
    */
-  async hasNothingPendingForStageTransition(taskUid) {
+  async checkStageTransition(taskUid) {
+    const unknown = { hasPending: true, criteria: [] };
     const url = TYPO3.settings.ajaxUrls.editorialflow_task_check_stage_transition;
     if (!url) {
-      return false;
+      return unknown;
     }
     try {
       const result = await this.postJson(url, { task: taskUid });
-      return result.success === true && result.hasPending === false;
+      if (result.success !== true) {
+        return unknown;
+      }
+      return {
+        hasPending: result.hasPending !== false,
+        criteria: Array.isArray(result.criteria) ? result.criteria : [],
+      };
     } catch {
-      return false;
+      return unknown;
     }
   }
 
@@ -478,7 +494,7 @@ class EditorialFlowBoard {
     }
   }
 
-  async openStageTransitionModal(taskUid, targetStageUid, columnTitle, cardTitle, askToDeactivate = false) {
+  async openStageTransitionModal(taskUid, targetStageUid, columnTitle, cardTitle, askToDeactivate = false, criteria = []) {
     try {
       const response = await this.workspaceUi.sendRemoteRequest(
         this.workspaceUi.generateRemotePayloadBody('sendToSpecificStageWindow', [targetStageUid]),
@@ -492,7 +508,7 @@ class EditorialFlowBoard {
         return;
       }
 
-      const form = this.buildStageTransitionForm(stageDialogData, askToDeactivate);
+      const form = this.buildStageTransitionForm(stageDialogData, askToDeactivate, criteria, taskUid);
       const modal = Modal.advanced({
         type: Modal.types.default,
         title: workspacesLabels.get('actionSendToStage'),
@@ -527,14 +543,33 @@ class EditorialFlowBoard {
 
               try {
                 const dialogValues = this.readStageTransitionForm(currentForm);
-                const result = await this.postJson(TYPO3.settings.ajaxUrls.editorialflow_task_execute_stage, {
-                  task: taskUid,
-                  stageUid: targetStageUid,
-                  comment: dialogValues.comment,
-                  recipients: dialogValues.recipients,
-                  additional: dialogValues.additional,
-                  deactivateActiveTask: dialogValues.deactivateActiveTask,
-                });
+                const send = (acknowledgeIncomplete) => this.postJson(
+                  TYPO3.settings.ajaxUrls.editorialflow_task_execute_stage,
+                  {
+                    task: taskUid,
+                    stageUid: targetStageUid,
+                    comment: dialogValues.comment,
+                    recipients: dialogValues.recipients,
+                    additional: dialogValues.additional,
+                    deactivateActiveTask: dialogValues.deactivateActiveTask,
+                    acknowledgeIncomplete,
+                  },
+                );
+
+                let result = await send(false);
+
+                // Not a refusal: the server asked whether the criteria left open
+                // were meant to stay open. Answering yes resends the same
+                // transition with the acknowledgement, which is what gets written
+                // into the acceptance record. Answering no leaves the dialog up
+                // with the criteria still there to tick.
+                if (result.needsAcknowledgement === true) {
+                  if (!(await confirmIncompleteCriteria(result))) {
+                    return;
+                  }
+                  result = await send(true);
+                }
+
                 if (result.success !== true) {
                   notifyRefusal(result, 'Could not move the task to that stage.', {
                     board: this,
@@ -547,15 +582,6 @@ class EditorialFlowBoard {
                 currentModal.hideModal();
                 this.announce(`Moved ${cardTitle} to ${columnTitle}.`);
                 Notification.success('Editorial Flow', `${cardTitle} moved to ${columnTitle}.`);
-                // Soft warning, never a block: core already decided the move itself
-                // is allowed, this only flags that the stage being left had unchecked
-                // review items.
-                if (result.incompleteChecklistItems > 0) {
-                  Notification.warning(
-                    'Editorial Flow',
-                    `${result.incompleteChecklistItems} checklist item(s) were left unchecked in the previous stage.`,
-                  );
-                }
                 window.location.reload();
               } catch (error) {
                 // Every rejection this endpoint sends is about the task's own
@@ -675,7 +701,7 @@ class EditorialFlowBoard {
     form.append(section);
   }
 
-  buildStageTransitionForm(stageDialogData, askToDeactivate) {
+  buildStageTransitionForm(stageDialogData, askToDeactivate, criteria = [], taskUid = 0) {
     const wrapper = document.createElement('div');
 
     const form = document.createElement('form');
@@ -825,6 +851,11 @@ class EditorialFlowBoard {
     if (askToDeactivate) {
       this.appendActiveTaskChoice(form);
     }
+
+    // Last, right above the buttons: the criteria are what the editor answers
+    // just before pressing OK, and core's own comment field is what they are
+    // most likely to have come here to write.
+    appendAcceptanceCriteria(form, criteria, taskUid);
 
     return wrapper;
   }

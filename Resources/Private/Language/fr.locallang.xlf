@@ -832,6 +832,47 @@
                 <source>Add acceptance criterion</source>
                 <target>Ajouter un critère de validation</target>
             </trans-unit>
+
+            <trans-unit id="criteria.incomplete.message" xml:space="preserve">
+                <source>%1$d of %2$d acceptance criteria for "%3$s" are not confirmed.</source>
+                <target>%1$d critères de validation sur %2$d pour « %3$s » ne sont pas confirmés.</target>
+            </trans-unit>
+            <trans-unit id="criteria.record.heading" xml:space="preserve">
+                <source>Acceptance criteria for "%1$s":</source>
+                <target>Critères de validation pour « %1$s » :</target>
+            </trans-unit>
+            <trans-unit id="criteria.record.allConfirmed" xml:space="preserve">
+                <source>All criteria confirmed.</source>
+                <target>Tous les critères sont confirmés.</target>
+            </trans-unit>
+            <trans-unit id="criteria.record.acknowledged" xml:space="preserve">
+                <source>Sent on with %1$d of %2$d criteria left unconfirmed.</source>
+                <target>Transmis avec %1$d critères sur %2$d non confirmés.</target>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.heading" xml:space="preserve">
+                <source>Acceptance criteria</source>
+                <target>Critères de validation</target>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.hint" xml:space="preserve">
+                <source>Confirm what this stage asks for. Each tick is saved immediately and recorded in the task's history.</source>
+                <target>Confirmez ce que cette étape demande. Chaque coche est enregistrée immédiatement et inscrite dans l'historique de la tâche.</target>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.error" xml:space="preserve">
+                <source>Could not record that criterion.</source>
+                <target>Ce critère n'a pas pu être enregistré.</target>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.title" xml:space="preserve">
+                <source>Unconfirmed acceptance criteria</source>
+                <target>Critères de validation non confirmés</target>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.send" xml:space="preserve">
+                <source>Send anyway</source>
+                <target>Transmettre quand même</target>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.back" xml:space="preserve">
+                <source>Back to the criteria</source>
+                <target>Retour aux critères</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

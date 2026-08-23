@@ -42,6 +42,19 @@ final class ActivityLogger
     public const EVENT_WORK_STARTED = 'work_started';
     public const EVENT_ASSIGNED = 'assigned';
     public const EVENT_STAGE_CHANGED = 'stage_changed';
+    /**
+     * One of the stage's acceptance criteria was ticked or un-ticked, payload
+     * `{item, title, checked}`.
+     *
+     * An activity rather than a comment, deliberately. A comment per tick would
+     * put six rows in the timeline for one review pass and bump the task's
+     * comment counter with text nobody wrote - while what an editor actually
+     * needs later is who confirmed what, and when, which is precisely what an
+     * activity entry is. The prose version an editor reads as one block is the
+     * acceptance record written when the task leaves the stage (see
+     * StageTransitionService::transition()'s $acceptanceRecord).
+     */
+    public const EVENT_CHECKLIST_CHECKED = 'checklist_checked';
     /** One member went live while others are still pending; the task stays open. */
     public const EVENT_PUBLISHED = 'published';
     public const EVENT_CLOSED = 'closed';

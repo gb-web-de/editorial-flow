@@ -1358,6 +1358,11 @@ final class TaskAjaxController
             $body['deactivateActiveTask'] ?? false,
             FILTER_VALIDATE_BOOL,
         );
+        // The editor's answer to the question below, sent on the second attempt.
+        $acknowledgeIncomplete = filter_var(
+            $body['acknowledgeIncomplete'] ?? false,
+            FILTER_VALIDATE_BOOL,
+        );
         $selectedRecipientUids = [];
         if (is_array($body['recipients'] ?? null)) {
             foreach ($body['recipients'] as $recipientUid) {
@@ -1399,12 +1404,37 @@ final class TaskAjaxController
             $additionalRecipients,
         );
 
-        // Read before the transition moves the task on: a soft warning about
-        // the stage being LEFT, not the one being entered - see
-        // TaskChecklistRepository::countIncomplete(). Never blocks the move;
-        // core is already the one true gate for whether this transition is
-        // allowed at all.
-        $incompleteChecklistItems = $this->checklistRepository->countIncomplete($taskUid, $workspaceUid, (int)$task['stage_uid']);
+        // Read before the transition moves the task on: these belong to the stage
+        // being LEFT, not the one being entered.
+        $stageTitle = $this->stageLabelFor($task);
+        $criteria = $this->checklistRepository->findChecklistForTask($taskUid, $workspaceUid, (int)$task['stage_uid']);
+        $unconfirmed = array_values(array_filter($criteria, static fn (array $item): bool => $item['completed'] === false));
+
+        if ($unconfirmed !== [] && !$acknowledgeIncomplete) {
+            // Not a rejection, and deliberately not routed through reject():
+            // nothing went wrong and nothing is refused, the server is asking a
+            // question the editor has to answer before this becomes a decision.
+            // Hence 200 and no log entry - the answer is what gets recorded, in
+            // the acceptance record below.
+            //
+            // Asked here rather than only in the dialog because the dialog is a
+            // client: a caller that skips it must not be able to skip the
+            // question with it.
+            return new JsonResponse([
+                'success' => false,
+                'code' => 'checklist-incomplete',
+                'needsAcknowledgement' => true,
+                'stageTitle' => $stageTitle,
+                'unconfirmed' => array_map(static fn (array $item): string => (string)$item['title'], $unconfirmed),
+                'message' => sprintf(
+                    $this->label('criteria.incomplete.message')
+                        ?: '%1$d of %2$d acceptance criteria for "%3$s" are not confirmed.',
+                    count($unconfirmed),
+                    count($criteria),
+                    $stageTitle,
+                ),
+            ]);
+        }
 
         $refusal = $this->stageTransitionService->transition(
             $task,
@@ -1413,6 +1443,7 @@ final class TaskAjaxController
             (int)($this->getBackendUser()->user['uid'] ?? 0),
             $comment,
             $recipients,
+            $criteria === [] ? null : $this->buildAcceptanceRecord($criteria, $stageTitle),
         );
         if ($refusal !== null) {
             // Core refused. Our own state must not drift away from what core did,
@@ -1438,20 +1469,62 @@ final class TaskAjaxController
         return new JsonResponse([
             'success' => true,
             'stageUid' => $targetStageUid,
-            'incompleteChecklistItems' => $incompleteChecklistItems,
             'activeTaskDeactivated' => $activeTaskDeactivated,
         ]);
     }
 
     /**
-     * The same "does this task have anything pending" question
-     * executeStageAction() answers with a hard `no-pending-versions` rejection -
-     * asked up front instead, so the board can refuse the drop with an inline
-     * message (matching getDropRejectionMessage()'s other rules in board.js)
-     * rather than opening the "Send to stage" dialog for a transition that can
-     * only ever fail. A task whose subject has never been touched inside its
-     * workspace has nothing pending - see WorkspaceIntegrationService::
-     * decorateMembers()'s hasPendingVersion note.
+     * The acceptance record: what the stage asked for, and what was answered,
+     * as one block of prose anchored to the transition it belongs to.
+     *
+     * A comment rather than a payload field, because this is the part an editor
+     * reads back later - the ticket's timeline renders it under the stage change
+     * it explains, next to whatever the editor wrote themselves. The per-tick
+     * activity entries (ActivityLogger::EVENT_CHECKLIST_CHECKED) stay the
+     * machine-readable half; this is the human one.
+     *
+     * @param list<array{uid: int, title: string, completed: bool}> $criteria
+     */
+    private function buildAcceptanceRecord(array $criteria, string $stageTitle): string
+    {
+        $lines = [sprintf(
+            $this->label('criteria.record.heading') ?: 'Acceptance criteria for "%1$s":',
+            $stageTitle,
+        )];
+
+        foreach ($criteria as $item) {
+            $lines[] = sprintf('[%s] %s', $item['completed'] ? 'x' : ' ', $item['title']);
+        }
+
+        $unconfirmed = count(array_filter($criteria, static fn (array $item): bool => $item['completed'] === false));
+        $lines[] = $unconfirmed === 0
+            ? ($this->label('criteria.record.allConfirmed') ?: 'All criteria confirmed.')
+            : sprintf(
+                $this->label('criteria.record.acknowledged')
+                    ?: 'Sent on with %1$d of %2$d criteria left unconfirmed.',
+                $unconfirmed,
+                count($criteria),
+            );
+
+        return implode("\n", $lines);
+    }
+
+    /**
+     * What the board needs to know before it opens the "Send to stage" dialog.
+     *
+     * Two answers, asked in one round trip because both are needed at the same
+     * moment:
+     *
+     * - `hasPending` is the same question executeStageAction() answers with a
+     *   hard `no-pending-versions` rejection. Asked up front, the board can
+     *   refuse the drop with an inline message (matching
+     *   getDropRejectionMessage()'s other rules in board.js) rather than opening
+     *   a dialog for a transition that can only ever fail. A task whose subject
+     *   has never been touched inside its workspace has nothing pending - see
+     *   WorkspaceIntegrationService::decorateMembers()'s hasPendingVersion note.
+     * - `criteria` are the acceptance criteria of the stage the task is LEAVING,
+     *   with what this task has confirmed so far, so the dialog can ask about
+     *   them instead of reporting afterwards that they went unanswered.
      */
     public function checkStageTransitionEligibilityAction(ServerRequestInterface $request): ResponseInterface
     {
@@ -1465,11 +1538,20 @@ final class TaskAjaxController
 
         $workspaceUid = (int)$task['workspace_uid'];
         if ($workspaceUid < 1) {
-            return new JsonResponse(['success' => true, 'hasPending' => false]);
+            return new JsonResponse(['success' => true, 'hasPending' => false, 'criteria' => []]);
         }
 
         $versionsByTable = $this->memberSynchronizer->findPendingVersionsByTable($taskUid, $workspaceUid);
-        return new JsonResponse(['success' => true, 'hasPending' => $versionsByTable !== []]);
+
+        return new JsonResponse([
+            'success' => true,
+            'hasPending' => $versionsByTable !== [],
+            'criteria' => $this->checklistRepository->findChecklistForTask(
+                $taskUid,
+                $workspaceUid,
+                (int)$task['stage_uid'],
+            ),
+        ]);
     }
 
     /**
@@ -2623,12 +2705,17 @@ final class TaskAjaxController
     }
 
     /**
-     * Check or uncheck one review checklist item for one task.
+     * Confirm or withdraw one of the stage's acceptance criteria for one task.
      *
-     * Open to anyone who can act on the task, unlike add/remove: filling in a
-     * stage's checklist is editorial work done while passing through it, not
+     * Open to anyone who can act on the task, unlike add/remove: confirming a
+     * criterion is editorial work done while passing through the stage, not
      * workspace policy - that distinction is what canManageChecklist() gates
      * instead.
+     *
+     * Every tick is written to the activity log as it happens. That is the
+     * durable half of "each check is recorded": sys_history knows nothing about
+     * these, and a task archived today would otherwise have no answer to "who
+     * said the links were checked" at all.
      */
     public function checklistToggleAction(ServerRequestInterface $request): ResponseInterface
     {
@@ -2645,12 +2732,25 @@ final class TaskAjaxController
             return $this->reject('missing-checklist-item', 'No checklist item was specified.', ['taskUid' => $taskUid]);
         }
 
-        $this->checklistRepository->setCompletion(
-            $taskUid,
-            $itemUid,
-            $completed,
-            (int)($this->getBackendUser()->user['uid'] ?? 0),
-        );
+        // Resolved rather than trusted, for the title the activity entry needs -
+        // and because a criterion the client names does not necessarily exist.
+        $item = $this->checklistRepository->findItem($itemUid);
+        if ($item === null) {
+            return $this->reject(
+                'missing-checklist-item',
+                'That acceptance criterion no longer exists.',
+                ['taskUid' => $taskUid, 'itemUid' => $itemUid],
+            );
+        }
+
+        $beUserId = (int)($this->getBackendUser()->user['uid'] ?? 0);
+        $this->checklistRepository->setCompletion($taskUid, $itemUid, $completed, $beUserId);
+
+        $this->activityLogger->log($taskUid, ActivityLogger::EVENT_CHECKLIST_CHECKED, $beUserId, [
+            'item' => $itemUid,
+            'title' => (string)$item['title'],
+            'checked' => $completed,
+        ]);
 
         return new JsonResponse(['success' => true]);
     }

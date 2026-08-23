@@ -80,8 +80,16 @@ final class WizardLabelsResolveTest extends FunctionalTestCase
     }
 
     /**
-     * The Visual Editor's actions translate through TaskAjaxController::veLabel()
-     * rather than the provider's translate(), so they need scraping of their own.
+     * The controller translates through its own label() helper rather than the
+     * provider's translate(), so its keys need scraping of their own. veLabel()
+     * is the Visual Editor's wrapper around the same helper and is caught by the
+     * same pattern.
+     *
+     * Several of these carry an `?: 'English fallback'` so a missing key degrades
+     * to readable text rather than to a blank message. That is deliberate - some
+     * of them are persisted into a comment an editor reads back later - but it
+     * also means nothing else would ever notice the key being gone, which is
+     * what this scrape is for.
      *
      * @return list<string>
      */
@@ -90,10 +98,10 @@ final class WizardLabelsResolveTest extends FunctionalTestCase
         $source = file_get_contents(__DIR__ . '/../../../Classes/Controller/TaskAjaxController.php');
         self::assertIsString($source);
 
-        preg_match_all("/veLabel\('([^']+)'/", $source, $matches);
+        preg_match_all("/(?:ve)?[Ll]abel\('([^']+)'/", $source, $matches);
 
         $keys = array_values(array_unique($matches[1]));
-        self::assertNotEmpty($keys, 'No veLabel() calls found - has the helper been renamed?');
+        self::assertNotEmpty($keys, 'No label() calls found - has the helper been renamed?');
 
         return $keys;
     }

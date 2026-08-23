@@ -832,6 +832,47 @@
                 <source>Add acceptance criterion</source>
                 <target>Abnahmekriterium hinzufügen</target>
             </trans-unit>
+
+            <trans-unit id="criteria.incomplete.message" xml:space="preserve">
+                <source>%1$d of %2$d acceptance criteria for "%3$s" are not confirmed.</source>
+                <target>%1$d von %2$d Abnahmekriterien für „%3$s“ sind nicht bestätigt.</target>
+            </trans-unit>
+            <trans-unit id="criteria.record.heading" xml:space="preserve">
+                <source>Acceptance criteria for "%1$s":</source>
+                <target>Abnahmekriterien für „%1$s“:</target>
+            </trans-unit>
+            <trans-unit id="criteria.record.allConfirmed" xml:space="preserve">
+                <source>All criteria confirmed.</source>
+                <target>Alle Kriterien bestätigt.</target>
+            </trans-unit>
+            <trans-unit id="criteria.record.acknowledged" xml:space="preserve">
+                <source>Sent on with %1$d of %2$d criteria left unconfirmed.</source>
+                <target>Weitergeschickt mit %1$d von %2$d nicht bestätigten Kriterien.</target>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.heading" xml:space="preserve">
+                <source>Acceptance criteria</source>
+                <target>Abnahmekriterien</target>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.hint" xml:space="preserve">
+                <source>Confirm what this stage asks for. Each tick is saved immediately and recorded in the task's history.</source>
+                <target>Bestätigen Sie, was diese Stufe verlangt. Jeder Haken wird sofort gespeichert und in der Historie der Aufgabe festgehalten.</target>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.error" xml:space="preserve">
+                <source>Could not record that criterion.</source>
+                <target>Dieses Kriterium konnte nicht festgehalten werden.</target>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.title" xml:space="preserve">
+                <source>Unconfirmed acceptance criteria</source>
+                <target>Nicht bestätigte Abnahmekriterien</target>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.send" xml:space="preserve">
+                <source>Send anyway</source>
+                <target>Trotzdem weiterschicken</target>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.back" xml:space="preserve">
+                <source>Back to the criteria</source>
+                <target>Zurück zu den Kriterien</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

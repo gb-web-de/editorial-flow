@@ -690,6 +690,42 @@
             <trans-unit id="criteria.new" xml:space="preserve">
                 <source>Add acceptance criterion</source>
             </trans-unit>
+
+            <!-- Asked in the "Send to stage" dialog and, when something is left
+                 open, confirmed once before the move goes through. %1$d is the
+                 number left unconfirmed, %2$d the total, %3$s the stage's title. -->
+            <trans-unit id="criteria.incomplete.message" xml:space="preserve">
+                <source>%1$d of %2$d acceptance criteria for "%3$s" are not confirmed.</source>
+            </trans-unit>
+            <!-- The acceptance record written into the task's history when it
+                 leaves a stage that asked for criteria. %1$s is the stage title. -->
+            <trans-unit id="criteria.record.heading" xml:space="preserve">
+                <source>Acceptance criteria for "%1$s":</source>
+            </trans-unit>
+            <trans-unit id="criteria.record.allConfirmed" xml:space="preserve">
+                <source>All criteria confirmed.</source>
+            </trans-unit>
+            <trans-unit id="criteria.record.acknowledged" xml:space="preserve">
+                <source>Sent on with %1$d of %2$d criteria left unconfirmed.</source>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.heading" xml:space="preserve">
+                <source>Acceptance criteria</source>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.hint" xml:space="preserve">
+                <source>Confirm what this stage asks for. Each tick is saved immediately and recorded in the task's history.</source>
+            </trans-unit>
+            <trans-unit id="criteria.dialog.error" xml:space="preserve">
+                <source>Could not record that criterion.</source>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.title" xml:space="preserve">
+                <source>Unconfirmed acceptance criteria</source>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.send" xml:space="preserve">
+                <source>Send anyway</source>
+            </trans-unit>
+            <trans-unit id="criteria.confirm.back" xml:space="preserve">
+                <source>Back to the criteria</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

@@ -77,6 +77,35 @@ final class TaskChecklistRepository
             ->fetchAllAssociative();
     }
 
+    /**
+     * One criterion by uid, or null when it does not exist or was removed.
+     *
+     * Used by the toggle endpoint, which needs the title for the activity entry
+     * it writes - and gets a real existence check for free. Before this, any
+     * integer from the client produced a state row for an item that was never
+     * there.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findItem(int $itemUid): ?array
+    {
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE_ITEM);
+        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+
+        $row = $queryBuilder
+            ->select('*')
+            ->from(self::TABLE_ITEM)
+            ->where(
+                $queryBuilder->expr()->eq('uid', $queryBuilder->createNamedParameter($itemUid, Connection::PARAM_INT)),
+                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->setMaxResults(1)
+            ->executeQuery()
+            ->fetchAssociative();
+
+        return $row === false ? null : $row;
+    }
+
     public function addItem(int $workspaceUid, int $stageUid, string $title, int $sorting): int
     {
         $connection = $this->connectionPool->getConnectionForTable(self::TABLE_ITEM);
@@ -121,22 +150,6 @@ final class TaskChecklistRepository
             'title' => (string)$item['title'],
             'completed' => in_array((int)$item['uid'], $completedItemUids, true),
         ], $items);
-    }
-
-    /**
-     * How many of a stage's checklist items this task has not yet checked off -
-     * the soft-warning executeStageAction() shows before letting a task leave a
-     * stage with unfinished items. 0 when the stage has no checklist at all.
-     */
-    public function countIncomplete(int $taskUid, int $workspaceUid, int $stageUid): int
-    {
-        $items = $this->findItemsForStage($workspaceUid, $stageUid);
-        if ($items === []) {
-            return 0;
-        }
-        $completedItemUids = $this->findCompletedItemUids($taskUid, array_map(static fn (array $item): int => (int)$item['uid'], $items));
-
-        return count($items) - count($completedItemUids);
     }
 
     /**
