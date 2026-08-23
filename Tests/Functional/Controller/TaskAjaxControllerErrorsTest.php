@@ -5,20 +5,12 @@ declare(strict_types=1);
 namespace GbWeb\EditorialFlow\Tests\Functional\Controller;
 
 use GbWeb\EditorialFlow\Controller\TaskAjaxController;
-use GbWeb\EditorialFlow\Domain\Repository\CommentRepository;
 use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
-use GbWeb\EditorialFlow\Service\ActivityLogger;
-use GbWeb\EditorialFlow\Service\ReferenceInspector;
-use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
-use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
-use GbWeb\EditorialFlow\Service\WorkspaceIntegrationService;
 use PHPUnit\Framework\Attributes\Test;
 use Psr\Http\Message\ServerRequestInterface;
 use Psr\Log\AbstractLogger;
 use Stringable;
-use TYPO3\CMS\Backend\Routing\UriBuilder;
 use TYPO3\CMS\Core\Http\ServerRequest;
-use TYPO3\CMS\Core\View\ViewFactoryInterface;
 use TYPO3\TestingFramework\Core\Functional\FunctionalTestCase;
 
 /**
@@ -36,6 +28,8 @@ use TYPO3\TestingFramework\Core\Functional\FunctionalTestCase;
  */
 final class TaskAjaxControllerErrorsTest extends FunctionalTestCase
 {
+    use BuildsTaskAjaxController;
+
     /**
      * @var string[]
      */
@@ -64,52 +58,9 @@ final class TaskAjaxControllerErrorsTest extends FunctionalTestCase
 
     private function subject(): TaskAjaxController
     {
-        // Symfony's ->get() has no "construct with one argument overridden"
-        // operation, so the controller is rebuilt by hand with the logger
-        // replaced. Everything else is pulled from the container where it is
-        // public - CommentRepository and WorkspaceIntegrationService are not
-        // (never injected anywhere but this controller), so those two are
-        // constructed directly from public core services instead.
-        $connectionPool = $this->get(\TYPO3\CMS\Core\Database\ConnectionPool::class);
-        $taskRepository = $this->get(TaskRepository::class);
-        $checklistRepository = $this->get(\GbWeb\EditorialFlow\Domain\Repository\TaskChecklistRepository::class);
-        $activityLogger = $this->get(ActivityLogger::class);
-
-        return new TaskAjaxController(
-            $taskRepository,
-            new CommentRepository($connectionPool),
-            $checklistRepository,
-            $this->get(TaskSubjectRegistry::class),
-            $this->get(TaskMemberSynchronizer::class),
-            $this->get(ReferenceInspector::class),
-            $activityLogger,
-            $this->get(\GbWeb\EditorialFlow\Service\ActiveTaskSession::class),
-            $this->get(\GbWeb\EditorialFlow\Service\PendingPageHandoff::class),
-            $this->get(\GbWeb\EditorialFlow\Service\PendingSubjectHandoff::class),
-            $this->get(\GbWeb\EditorialFlow\Service\RecordCreationTargetProvider::class),
-            $this->get(\GbWeb\EditorialFlow\Notification\AssignmentNotificationService::class),
-            new WorkspaceIntegrationService(
-                $connectionPool,
-                $taskRepository,
-                $checklistRepository,
-                $activityLogger,
-                $this->get(\TYPO3\CMS\Workspaces\Service\HistoryService::class),
-                $this->get(\TYPO3\CMS\Core\Imaging\IconFactory::class),
-                $this->get(\TYPO3\CMS\Workspaces\Domain\Repository\WorkspaceStageRepository::class),
-                $this->get(\TYPO3\CMS\Workspaces\Domain\Repository\WorkspaceRepository::class),
-                $this->get(\TYPO3\CMS\Workspaces\Service\StagesService::class),
-                $this->get(\GbWeb\EditorialFlow\Service\WorkspaceConflictDetector::class),
-                $this->get(\TYPO3\CMS\Core\Schema\TcaSchemaFactory::class),
-                $this->get(\TYPO3\CMS\Core\Utility\DiffUtility::class),
-            ),
-            $this->get(\TYPO3\CMS\Workspaces\Authorization\WorkspacePublishGate::class),
-            $this->get(\GbWeb\EditorialFlow\Service\StageTransitionService::class),
-            $this->get(\TYPO3\CMS\Workspaces\Service\StagesService::class),
-            $this->get(UriBuilder::class),
-            $this->get(ViewFactoryInterface::class),
-            $this->logger,
-            $this->get(\GbWeb\EditorialFlow\Service\WorkspaceConflictDetector::class),
-        );
+        // The recording logger is the point of this test case, so this is the
+        // one place that overrides the trait's default.
+        return $this->buildTaskAjaxController($this->logger);
     }
 
     private function jsonRequest(array $body): ServerRequestInterface
