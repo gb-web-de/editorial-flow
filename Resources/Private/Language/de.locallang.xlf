@@ -886,6 +886,11 @@
                 <source>Editorial Flow: a task was closed</source>
                 <target>Editorial Flow: Eine Aufgabe wurde geschlossen</target>
             </trans-unit>
+
+            <trans-unit id="reaction.task" xml:space="preserve">
+                <source>Editorial Flow: create, comment on or close a task</source>
+                <target>Editorial Flow: Aufgabe anlegen, kommentieren oder schließen</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

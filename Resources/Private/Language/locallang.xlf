@@ -738,6 +738,12 @@
             <trans-unit id="webhook.taskClosed" xml:space="preserve">
                 <source>Editorial Flow: a task was closed</source>
             </trans-unit>
+
+            <!-- Offered in Administration > Integrations > Reactions when an
+                 administrator sets up an incoming webhook. -->
+            <trans-unit id="reaction.task" xml:space="preserve">
+                <source>Editorial Flow: create, comment on or close a task</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

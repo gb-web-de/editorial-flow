@@ -304,6 +304,69 @@ The distinction that makes this workable: Backlog, Planned and Done are **Conten
 Flow's own** states, which exist precisely because core has no notion of "not
 versioned yet". Those are written directly. Everything between them belongs to core.
 
+## Connecting an external tool: Jira, Trello, whatever else
+
+The question that started this was whether webhooks and reactions could connect
+Editorial Flow to a tool the rest of the organisation already uses. They can, and
+both directions are built. What each half rests on is worth writing down, because
+neither is obvious from the code alone.
+
+**Outgoing.** Three PSR-14 events — `TaskCreatedEvent`, `TaskStageChangedEvent`,
+`TaskClosedEvent` — dispatched by `TaskEventPublisher` from the places that
+already write the matching activity entry. They exist for their own sake: before
+them there was no seam at all for anything to listen on, which is also what
+blocked the notification and @mention work listed under *Not implemented*.
+
+Each event has a webhook message beside it in `Classes/Webhook/`. **There is no
+listener of ours anywhere.** EXT:webhooks' `WebhookCompilerPass` reads the single
+parameter of `createFromEvent()` *by reflection* and wires core's own
+`MessageListener` to that event class. That binding is invisible in our source:
+rename the parameter type and the webhook silently disconnects, with nothing to
+see in a diff. `TaskWebhooksTest` therefore asserts against the registry rather
+than against the attribute.
+
+Messages carry a fully resolved `TaskSnapshot`, not a task uid, because core's
+rule for a webhook message is that it is a plain object — it may be queued and
+handled in a process where a service or a request means nothing any more. So
+stage titles, workspace titles and the subject's title are resolved *when the
+thing happens*. A Jira automation cannot look up `sys_workspace_stage`.
+
+**Incoming.** `Reaction\TaskReaction` accepts `create`, `comment` and `close`.
+Core's `ReactionResolver` authenticates by the reaction's secret and runs it as
+the backend user on the `sys_reaction` record; everything after that is treated
+as hostile input. Three rules carry it:
+
+- The subject table is checked against `TaskSubjectRegistry`, never taken as
+  given, and edit permission is re-derived against the real record — on every
+  action, not only on create, because a page can change hands long after the task
+  was opened.
+- A task is addressed **only** by the external reference it was created with,
+  never by uid. A payload that could name a task uid would let whoever holds the
+  secret reach every task in the installation.
+- "Never existed" and "already closed" get the same answer, because which one it
+  is says something about this installation that the caller has no business
+  learning.
+
+`create` is idempotent against `(external_system, external_ref)`. Webhooks are
+retried when they get no 2xx, and a retry must not put a second card on the
+board. Those columns are also what the outgoing messages carry back out, which is
+what stops a round trip duplicating a ticket on the other side.
+
+**Both packages are optional.** `#[WebhookMessage]` and `WebhookMessageInterface`
+live in `typo3/cms-core`, not in `typo3/cms-webhooks` — so the message types cost
+nothing on an installation without it and simply become configurable once it is
+there. `ReactionInterface` does not, which is why `TaskReaction` is registered
+from `Configuration/Services.php` behind an `interface_exists()` check and
+excluded from the `Classes/*` resource in `Services.yaml`. Declaring both as hard
+requirements was tried first and had an immediate price: every functional test
+instance in this package refused to build with *Package "editorial_flow" depends
+on package "reactions" which does not exist*, because a test instance only loads
+what its own `coreExtensionsToLoad` names.
+
+**What is not verified:** a real HTTP delivery. Everything up to and including
+core's own message factory is covered by tests; the message bus and the sender
+behind it are core's code and have not been exercised against a live receiver.
+
 ## Errors: named for developers, worded for editors
 
 Every rejection from `TaskAjaxController` carries two things, deliberately kept

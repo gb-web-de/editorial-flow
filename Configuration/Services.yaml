@@ -6,7 +6,13 @@ services:
 
   GbWeb\EditorialFlow\:
     resource: '../Classes/*'
-    exclude: '../Classes/Domain/Model/*'
+    exclude:
+      - '../Classes/Domain/Model/*'
+      # Registered from Services.php instead, and only when EXT:reactions is
+      # installed: TaskReaction implements an interface from that package, and
+      # autowiring it here would make the container build fail on an
+      # installation that does not have it.
+      - '../Classes/Reaction/*'
 
   # Listed explicitly so constructor changes in these entry-point classes are
   # reflected in TYPO3's compiled container as soon as Services.yaml changes.

@@ -118,6 +118,45 @@ final class TaskRepository
     }
 
     /**
+     * The open task an external system already knows about.
+     *
+     * The pair is the identity a round trip is built on: a Jira issue or a
+     * Trello card maps to at most one open task here, which is what lets the
+     * incoming reaction be retried - and webhooks are retried - without leaving
+     * a second card behind every time.
+     *
+     * Open only, deliberately. A closed task is an archive record; an external
+     * system asking about the same issue again is asking about new work.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function findOpenByExternalReference(string $system, string $reference): ?array
+    {
+        if ($system === '' || $reference === '') {
+            return null;
+        }
+
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE);
+        $queryBuilder->getRestrictions()->removeAll();
+
+        $row = $queryBuilder
+            ->select('*')
+            ->from(self::TABLE)
+            ->where(
+                $queryBuilder->expr()->eq('external_system', $queryBuilder->createNamedParameter($system)),
+                $queryBuilder->expr()->eq('external_ref', $queryBuilder->createNamedParameter($reference)),
+                $queryBuilder->expr()->eq('closed', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->orderBy('uid', 'DESC')
+            ->setMaxResults(1)
+            ->executeQuery()
+            ->fetchAssociative();
+
+        return $row === false ? null : $row;
+    }
+
+    /**
      * Get the open task for a subject, creating it if there is none.
      *
      * Uniqueness is enforced by the `one_open_task_per_record` unique key on the
