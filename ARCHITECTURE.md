@@ -304,6 +304,44 @@ The distinction that makes this workable: Backlog, Planned and Done are **Conten
 Flow's own** states, which exist precisely because core has no notion of "not
 versioned yet". Those are written directly. Everything between them belongs to core.
 
+### Acceptance criteria: asked before the task leaves a stage
+
+A stage can ask for things to be confirmed before work moves on — "all links
+checked", "someone else has read it". They are configured **on the stage**, not
+per task: what a review step asks for is a property of that step. Two ways in,
+one store (`tx_editorialflow_stage_checklist_item`):
+
+- a real `sys_workspace_stage` record carries them as an **inline relation**,
+  edited right next to `responsible_persons` in the workspace form;
+- core's three fixed stages (`0`, `-10`, `-20`) have no record and repeat in
+  every workspace, so theirs are keyed by workspace *and* stage and are managed
+  from the board's own dialog.
+
+That is the one table in this extension with TCA, and it has it for exactly one
+reason: FormEngine cannot render a relation to a table it does not know.
+
+The question is asked where it is about — in the "Send to stage" dialog, listing
+the criteria of the stage being **left**. Each box writes to the server as it is
+ticked rather than travelling with the transition, so a confirmation survives a
+cancelled dialog and is recorded with the moment and the person who gave it.
+
+Anything still open comes back from `executeStageAction()` as
+`checklist-incomplete`, with **200 and no log entry**: nothing failed and nothing
+is refused, the server is asking. Confirming resends the transition with
+`acknowledgeIncomplete`, and that is what goes into the record. Asked
+server-side and not only in the dialog, because the dialog is a client — one
+that skips the question must not skip the rule with it. It stays a question:
+the acknowledgement always gets the task through, and core remains the only gate
+on whether the move is allowed at all.
+
+What is written down is split, along the same line this document already draws
+between comments and decisions:
+
+| | Where | Why |
+|---|---|---|
+| **Each tick** | activity entry `checklist_checked`, carrying the criterion's **title** | machine-readable, durable, and still readable after the criterion is removed from the stage. A comment per tick would put six rows in the timeline for one review pass and bump the task's comment counter with text nobody wrote. |
+| **The acceptance record** | a comment anchored to the stage change | this is the part an editor reads back: every criterion with its final state, and the line saying it was sent on with some left open. |
+
 ## Connecting an external tool: Jira, Trello, whatever else
 
 The question that started this was whether webhooks and reactions could connect
@@ -565,6 +603,15 @@ Audited against the code on 2026-08-07, not written from memory.
   join that an earlier version's template referenced but never populated.
 - Page module banner via `ModifyPageLayoutContentEvent`.
 - Comment form in the ticket view, refused server-side on closed tasks.
+- **Acceptance criteria per stage**, configured on the `sys_workspace_stage`
+  record and asked for in the "Send to stage" dialog, with each tick in the
+  activity log and an acceptance record on the transition.
+- **Outgoing webhooks and an incoming reaction** for Jira, Trello or anything
+  else that speaks HTTP - three PSR-14 events, three webhook message types, one
+  reaction type. Both system extensions optional.
+- **Three demo workspaces and nine demo users** (`editorialflow:democontent`),
+  covering the merged stage columns, cross-workspace conflicts, a reviewer who
+  reviews in two workspaces at once, and a user with no workspace at all.
 - Splitting a record into its own task and moving it onto another one, from the
   ticket, the Page module badge and the Visual Editor bubble - with a dialog for
   the new task's title/description/assignee, a server-built picker for the move,
@@ -610,8 +657,13 @@ Audited against the code on 2026-08-07, not written from memory.
   content-planner - the lesson is recorded, the code is not written.
 - **Notification/@mention system.**
 - **Automated coverage for most of the JavaScript.** `dom-scope.js`, the wizard's
-  submission service and the Visual Editor's marker matching have vitest tests;
-  the board modules are still only syntax-checked.
+  submission service, the Visual Editor's marker matching and the stage dialog's
+  acceptance criteria have vitest tests; the rest of the board modules are still
+  only syntax-checked.
+- **A keyboard route to moving a card between columns.** Enter and Space select a
+  card and nothing more, so a stage change is drag-only today - which contradicts
+  the "nothing is drag-only" commitment above, and is why the browser test has to
+  dispatch HTML5 drag events itself (`Tests/Playwright/fixtures/board.ts`).
 
 **Verification**
 

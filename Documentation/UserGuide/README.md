@@ -172,6 +172,8 @@ stage"** dialog, the same one you'd see in the Workspaces module:
   the *next* stage).
 - Leave a comment explaining what's ready, or what needs a second look —
   it's attached to this exact transition in the task's history.
+- **Confirm the acceptance criteria** the stage you're leaving asks for, if it
+  asks for any (see below).
 
 Confirm, and the card moves — with the comment count now visible on the
 card itself:
@@ -188,6 +190,34 @@ Here's the full pipeline at a glance once a few cards are moving through it
 workspaces" column all in one row:
 
 ![The whole board, scrolled to show Review, Approval, Ready to publish, Done and Other workspaces columns side by side](Images/16-board-full-pipeline.png)
+
+### Acceptance criteria: the things worth checking before you hand work on
+
+A workspace can attach a short list to each stage — *"all links checked"*,
+*"images have alt text"*, *"someone else has read it"*. They belong to the
+**stage**, not to any one task, so everything passing through that step is asked
+the same questions.
+
+You'll meet them in two places:
+
+- **In the ticket**, under *Acceptance criteria*, while you're still working.
+  Tick things off as you go.
+- **In the "Send to stage" dialog**, listing whatever the stage you're *leaving*
+  still has open. Ticking a box there saves immediately — if you change your mind
+  and cancel the dialog, the tick stays.
+
+**Nothing is blocked.** If you send work on with something unticked, you're asked
+once to confirm that you meant to, and then it goes. What gets written into the
+task's history is the honest version: every criterion with its final state, and a
+line saying it was sent on with *n* left unconfirmed. Each individual tick is
+recorded too, with who made it and when — so "did anyone actually check the
+links?" has an answer six months later.
+
+> **Who sets them up:** an administrator, on the workspace's own stage records
+> (*Workspaces → the workspace → Stages*), or a workspace owner through the gear
+> button on a board column. Same list either way.
+
+---
 
 **"Other workspaces"** is a read-only parking spot: a task that belongs to a
 workspace other than the one you're currently in shows up there — visible,
@@ -256,6 +286,41 @@ widget* if they're not already on yours):
 
 ---
 
+## 9. Connecting Jira, Trello or another tool
+
+If your team plans work somewhere else, Editorial Flow can talk to it in both
+directions. This is administrator setup, not something you do per task — but it
+is worth knowing it exists, because it explains cards that appear on the board
+without anyone here creating them.
+
+**Out of TYPO3.** Three things can be sent to an outside system as they happen:
+a task was created, a task moved to another stage, a task was closed. An
+administrator wires these up in *Administration → Integrations → Webhooks*,
+choosing which of the three to send and where to send it. The message carries
+everything a receiver needs already resolved — the task, its stage and workspace
+**by name**, what the task is about, who it's assigned to, and a link straight to
+the board.
+
+**Into TYPO3.** The other direction goes through *Administration → Integrations
+→ Reactions*: a URL your other tool can call to create a task, add a comment to
+one, or close it. A card that arrived this way carries the reference it came from
+(a Jira issue key, a Trello card id), which is also what stops the same issue
+producing a second card every time the connection retries.
+
+Two things worth knowing as an editor:
+
+- A comment that came from outside is **marked with where it came from** — it
+  will not look like something a colleague wrote.
+- Closing a task from outside **leaves unpublished changes exactly where they
+  are.** Nobody's draft is thrown away because a ticket was dragged to Done
+  somewhere else.
+
+> Both need a system extension installed (`typo3/cms-webhooks` and
+> `typo3/cms-reactions`). If your *Administration* menu has no *Integrations*
+> entry, that is why.
+
+---
+
 ## What can I actually *do* with a task? — quick reference
 
 | Action | Where | What it does |
@@ -316,8 +381,14 @@ that looks perfect to the person building it and broken to everyone else.
   server-side machinery for "select several records, hand them all to one
   task" already exists and works — but no button anywhere currently calls
   it. Right now, selecting cards doesn't do anything beyond selecting them.
-- **No drag-to-reorder** for a stage's review checklist — items appear in
-  the order they were added; reordering means removing and re-adding.
+- **No drag-to-reorder** for a stage's acceptance criteria *from the board's
+  gear button* — there they appear in the order they were added, and reordering
+  means removing and re-adding. On the workspace's stage record itself they can
+  be dragged into order like any other inline records.
+- **Moving a card between columns needs the mouse.** The keyboard reaches
+  everything on a card — opening the ticket, assigning yourself, publishing,
+  closing — but a stage change is drag-only today. If you cannot use a mouse,
+  the same move is available in TYPO3's own Workspaces module.
 - **No bulk actions across tasks** (e.g. "assign all of these to me",
   "publish all of these") — everything is one task at a time.
 - **The "Other workspaces" column is read-only** by design, but there's
