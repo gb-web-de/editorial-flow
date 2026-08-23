@@ -219,6 +219,40 @@ final class StageAcceptanceCriteriaTest extends FunctionalTestCase
         self::assertFalse($payloads[1]['checked']);
     }
 
+    /**
+     * A form-encoded request delivers a boolean as text, and (bool)"false" is
+     * true - so withdrawing a confirmation was recorded as giving one, and the
+     * box came back ticked the next time the ticket was opened. Found by the
+     * browser test, because both sides of it looked right in isolation: the
+     * client sent `false` and the server read a boolean.
+     */
+    #[Test]
+    public function aWithdrawnConfirmationSentAsTextIsStillAWithdrawal(): void
+    {
+        $this->createReviewStage();
+        $itemUid = $this->addCriterion(0, 'All links checked');
+        $this->editPageInWorkspace();
+        $taskUid = $this->findOpenTaskUid();
+
+        $this->subject()->checklistToggleAction($this->jsonRequest([
+            'task' => $taskUid,
+            'itemUid' => $itemUid,
+            'completed' => true,
+        ]));
+        $this->subject()->checklistToggleAction($this->jsonRequest([
+            'task' => $taskUid,
+            'itemUid' => $itemUid,
+            // The string, exactly as a form-encoded body delivers it.
+            'completed' => 'false',
+        ]));
+
+        $payload = $this->decode($this->subject()->checkStageTransitionEligibilityAction($this->jsonRequest([
+            'task' => $taskUid,
+        ])));
+
+        self::assertFalse($payload['criteria'][0]['completed']);
+    }
+
     #[Test]
     public function aCriterionThatDoesNotExistIsRefused(): void
     {

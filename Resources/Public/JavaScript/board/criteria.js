@@ -74,8 +74,14 @@ function buildCriterion(document, item, taskUid) {
     const confirmed = checkbox.checked;
     checkbox.disabled = true;
     try {
+      // JSON, explicitly. Left to AjaxRequest's default the body is form-encoded
+      // and `false` arrives at the server as the string "false" - see
+      // TaskAjaxController::checklistToggleAction() for what that cost.
       const response = await new AjaxRequest(TYPO3.settings.ajaxUrls.editorialflow_checklist_toggle)
-        .post({ task: taskUid, itemUid: item.uid, completed: confirmed });
+        .post(
+          { task: taskUid, itemUid: item.uid, completed: confirmed },
+          { headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
       const result = await response.resolve();
       if (result.success !== true) {
         throw new Error(result.message);

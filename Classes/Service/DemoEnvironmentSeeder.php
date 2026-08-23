@@ -203,7 +203,7 @@ final class DemoEnvironmentSeeder
      */
     public function ensureCriteria(int $workspaceUid, int $stageUid, array $titles): int
     {
-        if ($titles === [] || $this->countCriteria($stageUid) > 0) {
+        if ($titles === [] || $this->countCriteria($workspaceUid, $stageUid) > 0) {
             return 0;
         }
 
@@ -223,18 +223,33 @@ final class DemoEnvironmentSeeder
         return count($titles);
     }
 
-    private function countCriteria(int $stageUid): int
+    /**
+     * Scoped exactly the way TaskChecklistRepository::findItemsForStage() reads:
+     * a real stage uid is globally unique and stands on its own, while core's
+     * fixed stages (0, -10, -20) repeat in every workspace and only the pair
+     * tells them apart. Counting stage 0 without the workspace would find
+     * another workspace's criteria and skip seeding this one's.
+     */
+    private function countCriteria(int $workspaceUid, int $stageUid): int
     {
         $queryBuilder = $this->connectionPool->getQueryBuilderForTable(self::CRITERIA_TABLE);
         $queryBuilder->getRestrictions()->removeAll();
 
+        $conditions = [
+            $queryBuilder->expr()->eq('stage_uid', $queryBuilder->createNamedParameter($stageUid, Connection::PARAM_INT)),
+            $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+        ];
+        if ($stageUid <= 0) {
+            $conditions[] = $queryBuilder->expr()->eq(
+                'workspace_uid',
+                $queryBuilder->createNamedParameter($workspaceUid, Connection::PARAM_INT),
+            );
+        }
+
         return (int)$queryBuilder
             ->count('uid')
             ->from(self::CRITERIA_TABLE)
-            ->where(
-                $queryBuilder->expr()->eq('stage_uid', $queryBuilder->createNamedParameter($stageUid, Connection::PARAM_INT)),
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
+            ->where(...$conditions)
             ->executeQuery()
             ->fetchOne();
     }

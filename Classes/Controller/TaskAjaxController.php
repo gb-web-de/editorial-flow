@@ -2739,7 +2739,12 @@ final class TaskAjaxController
         $body = $this->getBody($request);
         $taskUid = (int)($body['task'] ?? 0);
         $itemUid = (int)($body['itemUid'] ?? 0);
-        $completed = (bool)($body['completed'] ?? false);
+        // FILTER_VALIDATE_BOOL, not a cast. A form-encoded request delivers this
+        // as the STRING "false", and (bool)"false" is true - so withdrawing a
+        // confirmation was recorded as giving one, and the box came back ticked
+        // the next time the ticket was opened. Found by the browser test; every
+        // other boolean this controller reads already goes through the filter.
+        $completed = filter_var($body['completed'] ?? false, FILTER_VALIDATE_BOOL);
 
         $task = $this->findOpenTaskOrError($taskUid, 'update its checklist');
         if ($task instanceof ResponseInterface) {

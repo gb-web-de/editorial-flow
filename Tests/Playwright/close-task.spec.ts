@@ -73,6 +73,18 @@ test.describe('closing a task from the keyboard', () => {
 
     const dialog = topModal(page)
     const radios = dialog.locator('input[type="radio"]')
+
+    /*
+     * The dialog's body arrives from close-preview AFTER the modal is already
+     * up, so counting radios straight away can catch the placeholder and take
+     * the "nothing pending" branch on a task that has plenty pending - which is
+     * how this failed against a board that had a pending version on it. Wait for
+     * one of the two shapes to actually be there before branching.
+     */
+    await expect
+      .poll(async () => (await radios.count()) > 0 || /nothing pending/i.test(await dialog.innerText()))
+      .toBe(true)
+
     if ((await radios.count()) === 0) {
       // Nothing pending: the dialog collapses to a plain confirmation, which is
       // the intended degraded form rather than a failure.

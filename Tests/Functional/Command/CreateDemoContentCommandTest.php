@@ -171,18 +171,39 @@ final class CreateDemoContentCommandTest extends FunctionalTestCase
         self::assertCount(1, array_unique(array_column($responsible, 'parentid')));
     }
 
+    /**
+     * Both kinds of stage get criteria, and the difference is the point:
+     *
+     * - a real sys_workspace_stage record (uid > 0) carries them as an inline
+     *   relation, editable in the workspace's own form;
+     * - core's fixed Editing stage (uid 0) has no record at all, so its criteria
+     *   live in this extension's table keyed by workspace AND stage, and are
+     *   managed from the board.
+     *
+     * A demo that seeded only one of the two would leave the other path
+     * unexercised on every fresh installation.
+     */
     #[Test]
-    public function reviewStagesAreSeededWithAcceptanceCriteria(): void
+    public function bothKindsOfStageAreSeededWithAcceptanceCriteria(): void
     {
         $this->runSeeder();
 
-        $criteria = $this->criteria();
-        self::assertNotSame([], $criteria);
+        $stageUids = array_map(static fn (array $criterion): int => (int)$criterion['stage_uid'], $this->criteria());
+        self::assertNotSame([], $stageUids);
 
-        // Attached to a real stage record, not to one of core's fixed stage ids -
-        // that is what makes them reachable from the workspace record's own form.
-        foreach ($criteria as $criterion) {
-            self::assertGreaterThan(0, (int)$criterion['stage_uid']);
+        self::assertContains(0, $stageUids, 'the Editing stage has no criteria to confirm');
+        self::assertNotSame(
+            [],
+            array_filter($stageUids, static fn (int $uid): bool => $uid > 0),
+            'no criterion hangs off a real stage record',
+        );
+
+        // The fixed stage's rows must name their workspace - it is the only
+        // thing telling one workspace's stage 0 from another's.
+        foreach ($this->criteria() as $criterion) {
+            if ((int)$criterion['stage_uid'] === 0) {
+                self::assertGreaterThan(0, (int)$criterion['workspace_uid']);
+            }
         }
     }
 

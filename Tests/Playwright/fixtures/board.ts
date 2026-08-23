@@ -1,4 +1,4 @@
-import { type Frame, type Page, expect } from '@playwright/test'
+import { type Frame, type Locator, type Page, expect } from '@playwright/test'
 
 /*
  * The board is a backend module, so it renders inside the backend's content
@@ -85,4 +85,44 @@ export async function openTaskWizard(page: Page, frame: Frame) {
   }).toPass({ timeout: 20000 })
 
   return modal
+}
+
+/*
+ * Moves a card into a column the way the board's own drag-and-drop does.
+ *
+ * Playwright's dragTo() drives the mouse, and the mouse alone does not start an
+ * HTML5 drag: the board listens for `dragstart`/`dragover`/`drop` with a
+ * DataTransfer (board/drag-drop.js), and no synthetic mouse gesture produces
+ * those. So the events are dispatched inside the page, with a real DataTransfer
+ * carrying the same payload the board puts on it.
+ *
+ * This is the one place in this suite that reaches past the user's own input
+ * devices, and it is worth saying why it has to: there is no keyboard route to
+ * moving a card between columns. Enter and Space select a card, nothing more.
+ * That is a genuine gap against ARCHITECTURE.md's "nothing is drag-only"
+ * commitment - when it is closed, this helper should be replaced by whatever
+ * keys close it.
+ */
+export async function dragCardIntoColumn(frame: Frame, card: Locator, column: Locator): Promise<void> {
+  const taskUid = (await card.getAttribute('data-editorialflow-task')) ?? ''
+  const columnKey = (await column.getAttribute('data-editorialflow-column')) ?? ''
+
+  await frame.evaluate(
+    ({ task, key }) => {
+      const source = document.querySelector(`.editorialflow-card[data-editorialflow-task="${task}"]`)
+      const target = document.querySelector(`[data-editorialflow-column="${key}"]`)
+      if (source === null || target === null) {
+        throw new Error(`Card ${task} or column ${key} is not on this board.`)
+      }
+
+      const dataTransfer = new DataTransfer()
+      dataTransfer.setData('text/plain', task)
+
+      source.dispatchEvent(new DragEvent('dragstart', { bubbles: true, dataTransfer }))
+      target.dispatchEvent(new DragEvent('dragover', { bubbles: true, cancelable: true, dataTransfer }))
+      target.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }))
+      source.dispatchEvent(new DragEvent('dragend', { bubbles: true, dataTransfer }))
+    },
+    { task: taskUid, key: columnKey },
+  )
 }

@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+
+## Description: Run the Playwright suite against a throwaway copy of the database and restore it afterwards
+## Usage: editorialflow-e2e [playwright flags]
+## Example: "ddev editorialflow-e2e" or "ddev editorialflow-e2e --project=chromium-write"
+
+# The write-enabled specs create tasks, move stages and close cards on whatever
+# instance they are pointed at. Their own teardown closes what it created, but
+# closing is not deleting - this extension has no delete, deliberately - so a
+# dev instance still collects archived cards, and a spec that fails halfway
+# leaves its card behind entirely.
+#
+# A database snapshot is the answer that needs no second instance and no second
+# configuration: DDEV owns config/system/additional.php and hardcodes the
+# database name there, so pointing the WEB process at a different database per
+# run would mean editing a generated file and restarting the container. Taking a
+# snapshot, running, and restoring costs a few seconds and leaves the instance
+# exactly as it was found.
+#
+# Nothing here is required to run the tests - `npm run test:e2e` still works
+# directly. This is the wrapper for when you would rather not think about it.
+
+set -euo pipefail
+
+SNAPSHOT="editorialflow-e2e-$(date +%s)"
+
+echo "Snapshotting the database as ${SNAPSHOT} ..."
+ddev snapshot --name "${SNAPSHOT}" >/dev/null
+
+restore() {
+  echo "Restoring the database from ${SNAPSHOT} ..."
+  ddev snapshot restore "${SNAPSHOT}" >/dev/null
+  ddev snapshot --cleanup -y >/dev/null 2>&1 || true
+  echo "Done - the instance is back where it was."
+}
+# Restores on a failed run and on Ctrl-C too, which is the whole point of doing
+# this rather than remembering to clean up afterwards.
+trap restore EXIT
+
+echo "Seeding the demo environment ..."
+ddev exec .Build/bin/typo3 editorialflow:democontent --no-interaction
+
+echo "Running the browser suite ..."
+npx playwright test "$@"

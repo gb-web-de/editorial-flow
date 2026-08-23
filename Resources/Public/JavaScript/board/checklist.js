@@ -45,8 +45,13 @@ export function registerChecklistToggle() {
     checkbox.disabled = true;
 
     try {
+      // JSON, explicitly - same reason as board/criteria.js: form-encoded, a
+      // `false` reaches the server as the string "false".
       const response = await new AjaxRequest(TYPO3.settings.ajaxUrls.editorialflow_checklist_toggle)
-        .post({ task: taskUid, itemUid, completed });
+        .post(
+          { task: taskUid, itemUid, completed },
+          { headers: { 'Content-Type': 'application/json; charset=utf-8' } },
+        );
       const result = await response.resolve();
       if (result.success !== true) {
         Notification.error('Editorial Flow', result.message || 'Could not update the checklist.');

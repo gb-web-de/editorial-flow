@@ -59,6 +59,13 @@ use TYPO3\CMS\Core\Core\Bootstrap;
 )]
 final class CreateDemoContentCommand extends Command
 {
+    /**
+     * Core's own "Editing" stage, uid 0 - the one a workspace version sits in as
+     * soon as it exists. Named here because it is not a sys_workspace_stage
+     * record and therefore has no title to look up.
+     */
+    private const EDITING_STAGE = 'Editing';
+
     private const GROUP_TITLE = 'Editorial Flow Editors';
     private const GROUP_MODULES = 'web_editorialflow,web_layout,file_list';
     private const DEMO_PASSWORD = 'Password.1';
@@ -88,6 +95,16 @@ final class CreateDemoContentCommand extends Command
                 'Approval' => ['reviewer', 'stagelead'],
             ],
             'criteria' => [
+                // The stage every task leaves first, and the one an editor is
+                // asked about most often. It is also core's fixed stage 0, which
+                // has no sys_workspace_stage record - so these live in the
+                // extension's own table keyed by workspace AND stage, and are
+                // managed from the board rather than the workspace form. Seeded
+                // here so both storage paths are visible on a fresh install.
+                self::EDITING_STAGE => [
+                    'Content is complete, not a draft',
+                    'Someone else has read it',
+                ],
                 'Review' => [
                     'All links checked',
                     'Images have alt text',
@@ -272,8 +289,10 @@ final class CreateDemoContentCommand extends Command
     private function seedCriteria(SymfonyStyle $io, string $workspaceTitle, int $workspaceUid, array $stageUids, array $criteria): void
     {
         foreach ($criteria as $stageTitle => $titles) {
-            $stageUid = $stageUids[$stageTitle] ?? 0;
-            if ($stageUid === 0) {
+            // 0 is a real answer for Editing and "no such stage" for everything
+            // else, which is why the fixed stage is matched by name first.
+            $stageUid = $stageTitle === self::EDITING_STAGE ? 0 : ($stageUids[$stageTitle] ?? null);
+            if ($stageUid === null) {
                 continue;
             }
 

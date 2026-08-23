@@ -120,6 +120,7 @@ ddev composer test:unit
 ddev composer test:functional
 npm run test:js             # vitest, the extension's own ES modules
 npm run test:e2e            # Playwright, against a served backend
+ddev editorialflow-e2e      # the same, wrapped in a database snapshot
 ```
 
 The functional suite runs on SQLite in CI and needs no database service:
@@ -133,6 +134,26 @@ unique across worktrees:
 npm ci && npx playwright install --with-deps chromium
 EDITORIALFLOW_BASE_URL=$(ddev describe -j | jq -r .raw.primary_url) npm run test:e2e
 ```
+
+### The specs that write, and the ones that do not
+
+Two Playwright projects, deliberately apart:
+
+- **`chromium`** renders and navigates and changes nothing. A run that only wants
+  to know whether the board still comes up leaves no trace on the installation it
+  was pointed at.
+- **`chromium-write`** (`Tests/Playwright/write/`) plans tasks, moves stages and
+  confirms acceptance criteria — the journeys that cannot be checked below the
+  UI. Everything it creates carries a per-run id in its title, and a `teardown`
+  project closes those cards afterwards whether the run passed or failed.
+
+Closing is as far as a browser can go: this extension has no delete, on purpose,
+so a dev instance still collects archived cards. `ddev editorialflow-e2e` takes a
+database snapshot first and restores it afterwards — including on a failed run or
+a Ctrl-C — which is the version to use when you would rather not think about it.
+
+The PHPUnit functional suite never touches the dev database at all: the testing
+framework creates and drops a `db_ft…` database per test run.
 
 CI serves the same installation without DDEV: `typo3 setup` on SQLite,
 `extension:setup` for the Camino content, `editorialflow:democontent` for the
