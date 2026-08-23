@@ -12,15 +12,32 @@ export function registerDragAndDrop(board) {
 
   const clearDropTargetStyles = () => {
     board.board.querySelectorAll('.editorialflow-column').forEach((column) => {
-      column.classList.remove('is-drop-target-valid', 'is-drop-target-invalid');
+      column.classList.remove('is-drop-target-valid', 'is-drop-target-invalid', 'is-drop-target-foreign');
     });
   };
 
+  /*
+   * Three states, not two.
+   *
+   * Red used to mean everything a card could not be dropped on, and that put
+   * one message on three quite different facts: "it is already here", "you are
+   * not allowed to move it there", and "this step is not part of your workspace
+   * at all". The third is not a refusal - a step another workspace defines was
+   * never a target for your card, and painting it like a rejected action reads
+   * as a fault the editor could have avoided.
+   *
+   * A foreign step is recognised by its own state rather than by the drop
+   * answer: BoardColumnRegistry gives a column `foreign_stage` exactly when the
+   * active workspace has no stage of that name.
+   */
   const updateDropTargetStyles = (card) => {
     board.board.querySelectorAll('.editorialflow-column').forEach((column) => {
-      const valid = board.canDropCardIntoColumn(card, column);
+      const foreign = column.dataset.editorialflowState === 'foreign_stage';
+      const valid = !foreign && board.canDropCardIntoColumn(card, column);
+
       column.classList.toggle('is-drop-target-valid', valid);
-      column.classList.toggle('is-drop-target-invalid', !valid);
+      column.classList.toggle('is-drop-target-foreign', foreign);
+      column.classList.toggle('is-drop-target-invalid', !valid && !foreign);
     });
   };
 

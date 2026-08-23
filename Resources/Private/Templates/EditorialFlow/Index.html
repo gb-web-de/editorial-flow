@@ -109,6 +109,7 @@
                          data-editorialflow-workspace="{workspaceUid}"
                          data-editorialflow-accepts-drop="{f:if(condition: column.acceptsDrop, then: 'true', else: 'false')}"
                          data-editorialflow-checklist-items="{column.checklistItemsJson}"
+                         title="{column.foreignHint}"
                          aria-labelledby="cf-col-{column.key}">
                     <h3 class="editorialflow-column-header {f:if(condition: column.colorShared, then: 'editorialflow-column-header--shared')} {f:if(condition: column.colorOwn, then: 'editorialflow-column-header--own')}"
                         id="cf-col-{column.key}"

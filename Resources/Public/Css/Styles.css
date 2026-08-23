@@ -447,6 +447,16 @@
     cursor: not-allowed !important;
 }
 
+/* A step that belongs to another workspace: not a refusal, so not red.
+   It keeps its own workspace colour and simply steps back while a drag is in
+   progress - "this is not part of your chain", rather than "you did something
+   wrong". No `cursor: not-allowed` either, for the same reason. */
+.editorialflow-column.is-drop-target-foreign {
+    opacity: 0.55;
+    border-style: dashed !important;
+    cursor: default;
+}
+
 .editorialflow-card-header {
     display: flex;
     align-items: flex-start;

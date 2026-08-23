@@ -891,6 +891,15 @@
                 <source>Editorial Flow: create, comment on or close a task</source>
                 <target>Editorial Flow: Aufgabe anlegen, kommentieren oder schließen</target>
             </trans-unit>
+
+            <trans-unit id="column.foreign.hint" xml:space="preserve">
+                <source>This step belongs to %1$s. Switch into that workspace to move a task through it.</source>
+                <target>Dieser Schritt gehört zu %1$s. Wechseln Sie in diesen Workspace, um eine Aufgabe durch ihn zu bewegen.</target>
+            </trans-unit>
+            <trans-unit id="column.foreign.otherWorkspace" xml:space="preserve">
+                <source>another workspace</source>
+                <target>einem anderen Workspace</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

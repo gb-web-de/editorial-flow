@@ -136,15 +136,67 @@ final class BoardColumnRegistry
             }
         }
 
+        /*
+         * Four sort keys, and the first one is the one this got wrong.
+         *
+         * "Editing" and "Ready to publish" are core's fixed bookends, not
+         * editorial steps that can move: every workspace starts at one and ends
+         * at the other, whatever it defines in between. Their POSITION however
+         * depends on how many custom stages the workspace has - in a workspace
+         * with none, "Ready to publish" sits at position 1 - and since a merged
+         * column takes the lowest position any workspace gives it, one workspace
+         * without review stages was enough to pull "Ready to publish" in front
+         * of every review column on the board. Ranking the bookends explicitly
+         * is what makes the board independent of the shortest chain on it.
+         *
+         * Then position, and only then whether the step belongs to the workspace
+         * the editor is actually in. Two chains of the same length put their
+         * differing steps on the same position - Editorial's "Approval" and
+         * Marketing's "Legal" are both the second review step - and that tie
+         * used to fall to the label, so whether an editor's own next step came
+         * before or after a step from a workspace they are not in was decided by
+         * the letter it starts with.
+         *
+         * The label stays as the last tie-break so the order is stable: two
+         * foreign steps on the same position have nothing else to be sorted by,
+         * and an order that changes between two page loads is worse than an
+         * arbitrary one.
+         */
         usort(
             $groups,
-            static fn (array $a, array $b): int => $a['position'] <=> $b['position'] ?: strcasecmp($a['label'], $b['label']),
+            fn (array $a, array $b): int => $this->stageRank($a) <=> $this->stageRank($b)
+                ?: $a['position'] <=> $b['position']
+                ?: (isset($a['stageUidByWorkspace'][$workspaceUid]) ? 0 : 1)
+                    <=> (isset($b['stageUidByWorkspace'][$workspaceUid]) ? 0 : 1)
+                ?: strcasecmp($a['label'], $b['label']),
         );
 
         return array_map(
             fn (array $group): array => $this->buildStageColumn($group, $workspaceUid, $canManageChecklist),
             $groups,
         );
+    }
+
+    /**
+     * Where a merged step belongs among the three bands the board has: the fixed
+     * edit stage, everything a workspace defines itself, and the fixed publish
+     * stage. Core emits its two in exactly those places for every workspace, and
+     * nothing an integrator configures can move them.
+     *
+     * @param array{label: string, position: int, workspaceUids: list<int>, stageUidByWorkspace: array<int, int>} $group
+     */
+    private function stageRank(array $group): int
+    {
+        foreach ($group['stageUidByWorkspace'] as $stageUid) {
+            if ($stageUid === StagesService::STAGE_EDIT_ID) {
+                return 0;
+            }
+            if ($stageUid === StagesService::STAGE_PUBLISH_ID) {
+                return 2;
+            }
+        }
+
+        return 1;
     }
 
     /**
@@ -191,6 +243,16 @@ final class BoardColumnRegistry
         return [
             'key' => $ownStageUid !== null ? 'stage-' . $ownStageUid : 'stage-foreign-' . md5($group['label']),
             'label' => $group['label'],
+            // Why this column is not a target, in a sentence, for the column's
+            // own title attribute. A dimmed column says "not for you" and
+            // nothing about why; the names underneath say which workspaces are
+            // involved but not what that means for the card being dragged.
+            'foreignHint' => $ownStageUid !== null ? '' : sprintf(
+                $this->translate('column.foreign.hint') ?: 'This step belongs to %1$s. Switch into that workspace to move a task through it.',
+                $contributingWorkspaceTitles === []
+                    ? ($this->translate('column.foreign.otherWorkspace') ?: 'another workspace')
+                    : implode(', ', $contributingWorkspaceTitles),
+            ),
             'state' => $ownStageUid !== null ? TaskState::fromStageId($ownStageUid)->value : 'foreign_stage',
             'stageUid' => $ownStageUid,
             // Every contributing workspace's own stage uid for this merged step -
@@ -229,6 +291,21 @@ final class BoardColumnRegistry
             // disclosure past it - this count is what decides which.
             'contributingWorkspaceCount' => count($contributingWorkspaceTitles),
         ];
+    }
+
+    /**
+     * An editor-facing text through the same `editorial_flow.messages` domain
+     * the wizard and the ajax controller use. Empty when the key is missing, so
+     * every caller states its own English fallback - this text is rendered into
+     * a title attribute and a blank tooltip is worse than an untranslated one.
+     */
+    private function translate(string $key): string
+    {
+        $languageService = $GLOBALS['LANG'] ?? null;
+
+        return $languageService instanceof LanguageService
+            ? $languageService->sL('editorial_flow.messages:' . $key)
+            : '';
     }
 
     /**

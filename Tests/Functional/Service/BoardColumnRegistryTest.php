@@ -102,6 +102,132 @@ final class BoardColumnRegistryTest extends FunctionalTestCase
         return null;
     }
 
+    /**
+     * A workspace without any custom stages has a chain of exactly two steps -
+     * Editing, then Ready to publish - so "Ready to publish" sits at position 1
+     * there. A merged column takes the LOWEST position any workspace gives it,
+     * and that was enough for one review-free workspace to pull "Ready to
+     * publish" in front of every review column on everybody's board.
+     *
+     * The demo environment has exactly such a workspace ("Quickfix"), which is
+     * how this was found: on a real board, not in this test.
+     */
+    #[Test]
+    public function aWorkspaceWithoutReviewStagesDoesNotPullPublishForward(): void
+    {
+        $this->createWorkspace(2, 'Quickfix', 'purple');
+        $this->createCustomStage(201, 1, 'Review', 1);
+        $this->createCustomStage(202, 1, 'Approval', 2);
+        // Workspace 2 gets no custom stage at all - Editing straight to Ready.
+
+        $labels = array_map(
+            static fn (array $column): string => (string)$column['label'],
+            $this->subject()->getColumns($GLOBALS['BE_USER'], 1, [2]),
+        );
+
+        $ready = array_search('Ready to publish', $labels, true);
+        self::assertIsInt($ready);
+        self::assertGreaterThan(array_search('Review', $labels, true), $ready);
+        self::assertGreaterThan(array_search('Approval', $labels, true), $ready);
+
+        // And the other bookend stays at the front for the same reason.
+        self::assertLessThan(array_search('Review', $labels, true), array_search('Editing', $labels, true));
+    }
+
+    /**
+     * Two workspaces whose chains are the same length put their differing steps
+     * on the same position - "Approval" is Editorial's second review step and
+     * "Legal" is Marketing's. The tie used to fall to the label, so whether an
+     * editor's own next step came before or after a step from a workspace they
+     * are not in was decided by the letter it starts with.
+     *
+     * Named for what an editor sees: their own chain, in their own order, with
+     * the outsiders behind it.
+     */
+    #[Test]
+    public function theActiveWorkspacesOwnChainKeepsItsOrder(): void
+    {
+        $this->createWorkspace(2, 'Marketing', 'purple');
+        $this->createCustomStage(201, 1, 'Review', 1);
+        $this->createCustomStage(202, 1, 'Approval', 2);
+        $this->createCustomStage(203, 2, 'Review', 1);
+        // Sorts before "Approval" alphabetically, and shares its position.
+        $this->createCustomStage(204, 2, 'Legal', 2);
+
+        $labels = array_map(
+            static fn (array $column): string => (string)$column['label'],
+            $this->subject()->getColumns($GLOBALS['BE_USER'], 1, [2]),
+        );
+
+        $approval = array_search('Approval', $labels, true);
+        $legal = array_search('Legal', $labels, true);
+
+        self::assertIsInt($approval);
+        self::assertIsInt($legal);
+        self::assertLessThan($legal, $approval, 'a step from another workspace pushed the editor\'s own step down');
+    }
+
+    /**
+     * The same, the other way round: a foreign step whose label sorts LAST must
+     * still come after the active workspace's own step. Without this the test
+     * above would also pass on the old alphabetical rule, which is exactly the
+     * trap it exists to avoid.
+     */
+    #[Test]
+    public function aForeignStepStaysBehindEvenWhenItsLabelSortsFirst(): void
+    {
+        $this->createWorkspace(2, 'Marketing', 'purple');
+        $this->createCustomStage(201, 1, 'Review', 1);
+        $this->createCustomStage(202, 1, 'Zweitkorrektur', 2);
+        $this->createCustomStage(203, 2, 'Review', 1);
+        $this->createCustomStage(204, 2, 'Abnahme', 2);
+
+        $labels = array_map(
+            static fn (array $column): string => (string)$column['label'],
+            $this->subject()->getColumns($GLOBALS['BE_USER'], 1, [2]),
+        );
+
+        self::assertLessThan(
+            array_search('Abnahme', $labels, true),
+            array_search('Zweitkorrektur', $labels, true),
+        );
+    }
+
+    /**
+     * A column for a step the active workspace does not have is not a target and
+     * never was - so it carries the sentence saying why, which the board renders
+     * as its title attribute. The dimming alone says "not for you" and nothing
+     * about what to do instead.
+     */
+    #[Test]
+    public function aForeignStepSaysWhichWorkspaceItBelongsTo(): void
+    {
+        $this->createWorkspace(2, 'Marketing', 'purple');
+        $this->createCustomStage(203, 2, 'Legal', 1);
+
+        $columns = $this->subject()->getColumns($GLOBALS['BE_USER'], 1, [2]);
+        $legal = $this->findColumnByLabel($columns, 'Legal');
+
+        self::assertIsArray($legal);
+        self::assertSame('foreign_stage', $legal['state']);
+        self::assertStringContainsString('Marketing', (string)$legal['foreignHint']);
+    }
+
+    /**
+     * And a step of the active workspace's own carries no such hint at all - an
+     * empty title attribute rather than a tooltip explaining nothing.
+     */
+    #[Test]
+    public function anOwnStepCarriesNoForeignHint(): void
+    {
+        $this->createCustomStage(201, 1, 'Review', 1);
+
+        $review = $this->findColumnByStageUid($this->subject()->getColumns($GLOBALS['BE_USER'], 1), 201);
+
+        self::assertIsArray($review);
+        self::assertSame('', $review['foreignHint']);
+    }
+
     #[Test]
     public function withNoOtherWorkspacesNothingIsColored(): void
     {

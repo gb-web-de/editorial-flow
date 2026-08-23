@@ -660,6 +660,12 @@ Audited against the code on 2026-08-07, not written from memory.
   submission service, the Visual Editor's marker matching and the stage dialog's
   acceptance criteria have vitest tests; the rest of the board modules are still
   only syntax-checked.
+- **A merged order for workspaces that disagree with each other.** Columns are
+  ordered by core's two fixed bookends first, then by a step's position in its
+  own workspace's chain, then by whether it belongs to the workspace the editor
+  is in. Two workspaces running the *same* steps in a *different* order
+  (Editorial: Review → Approval, Marketing: Approval → Review) still resolve to
+  one arbitrary-but-stable order rather than to a real topological one.
 - **A keyboard route to moving a card between columns.** Enter and Space select a
   card and nothing more, so a stage change is drag-only today - which contradicts
   the "nothing is drag-only" commitment above, and is why the browser test has to
