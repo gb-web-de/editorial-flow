@@ -29,7 +29,22 @@ final class TaskChecklistRepository
     }
 
     /**
-     * A stage's checklist item definitions, in board order.
+     * A stage's acceptance criteria, in board order.
+     *
+     * Keyed differently for the two kinds of stage there are, and the difference
+     * is not cosmetic:
+     *
+     * - A real `sys_workspace_stage` record has a globally unique uid, so it
+     *   identifies its workspace on its own. Filtering by `stage_uid` alone is
+     *   therefore not a loosened condition, it is the only one that works: an
+     *   item created through the inline relation on the stage record
+     *   (Configuration/TCA/Overrides/sys_workspace_stage.php) has no
+     *   `workspace_uid` at all, because FormEngine writes the parent pointer and
+     *   nothing else. Demanding the pair would silently hide every criterion an
+     *   integrator configured that way.
+     * - Core's three fixed stages (0, -10, -20) have no record and repeat in
+     *   every workspace, so there the pair is what tells them apart. They are
+     *   reachable through the board's own manage dialog only.
      *
      * @return list<array<string, mixed>>
      */
@@ -38,18 +53,25 @@ final class TaskChecklistRepository
         $queryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE_ITEM);
         $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
 
+        $conditions = [
+            $queryBuilder->expr()->eq('stage_uid', $queryBuilder->createNamedParameter($stageUid, Connection::PARAM_INT)),
+            // Belt and braces. DeletedRestriction does apply to this table - it is
+            // the one table of this extension with TCA, and TCA is what that
+            // restriction reads - but a query should say what it means without
+            // the reader having to know which table is the exception.
+            $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+        ];
+        if ($stageUid <= 0) {
+            $conditions[] = $queryBuilder->expr()->eq(
+                'workspace_uid',
+                $queryBuilder->createNamedParameter($workspaceUid, Connection::PARAM_INT),
+            );
+        }
+
         return $queryBuilder
             ->select('*')
             ->from(self::TABLE_ITEM)
-            ->where(
-                $queryBuilder->expr()->eq('workspace_uid', $queryBuilder->createNamedParameter($workspaceUid, Connection::PARAM_INT)),
-                $queryBuilder->expr()->eq('stage_uid', $queryBuilder->createNamedParameter($stageUid, Connection::PARAM_INT)),
-                // DeletedRestriction is a silent no-op here: it only ever adds a
-                // constraint for tables with a TCA `ctrl.delete` entry, and this
-                // extension's own tables deliberately have none (see ext_tables.sql).
-                // Explicit, not decorative.
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
+            ->where(...$conditions)
             ->orderBy('sorting', 'ASC')
             ->executeQuery()
             ->fetchAllAssociative();

@@ -164,14 +164,23 @@ if (!$this->tcaSchemaFactory->has($tableName)) {
 ```
 
 Editorial Flow's own tables (`tx_editorialflow_task`, `tx_editorialflow_task_item`,
-`tx_editorialflow_comment`, `tx_editorialflow_activity`,
-`tx_editorialflow_stage_checklist_item`) deliberately have **no TCA** (see
-`ext_tables.sql`'s header comment). So `->getRestrictions()->add(new
+`tx_editorialflow_comment`, `tx_editorialflow_activity`) deliberately have **no
+TCA** (see `ext_tables.sql`'s header comment). So `->getRestrictions()->add(new
 DeletedRestriction())`, used throughout the existing repositories, has silently
 never filtered `deleted = 1` rows for any of them. Confirmed directly: inserted a
 checklist item, soft-deleted it, and `findItemsForStage()` (using
 `DeletedRestriction`) still returned it; switching to an explicit
 `deleted = 0` condition in the `WHERE` clause fixed it immediately.
+
+**One table left that list.** `tx_editorialflow_stage_checklist_item` now *does*
+have TCA (`Configuration/TCA/`), because a stage's acceptance criteria are edited
+as an inline relation on the `sys_workspace_stage` record and FormEngine cannot
+render a relation to a table it does not know. For that one table
+`DeletedRestriction` is real. The explicit `deleted = 0` condition stayed anyway:
+a query should say what it means without the reader first having to work out
+which of six tables is the exception this month. Covered by
+`Tests/Functional/Configuration/StageCriteriaTcaTest`, whose delete test goes
+through a real DataHandler `delete` command rather than an `UPDATE`.
 
 Fixed in `TaskChecklistRepository` (the newest repository). **Not yet fixed** in
 `TaskRepository`, `CommentRepository`, or `ActivityLogger` - flagged as a

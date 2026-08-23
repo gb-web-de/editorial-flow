@@ -668,6 +668,28 @@
             <trans-unit id="badge.onPageOnly" xml:space="preserve">
                 <source>on this page, not edited yet</source>
             </trans-unit>
+
+            <!-- A stage's acceptance criteria, configured on the sys_workspace_stage
+                 record (Configuration/TCA/Overrides/sys_workspace_stage.php) and asked
+                 for again in the task before it leaves that stage. -->
+            <trans-unit id="criteria.table" xml:space="preserve">
+                <source>Acceptance criterion</source>
+            </trans-unit>
+            <trans-unit id="criteria.field" xml:space="preserve">
+                <source>Acceptance criteria</source>
+            </trans-unit>
+            <trans-unit id="criteria.field.description" xml:space="preserve">
+                <source>Editors are asked to confirm these before a task leaves this stage. Leaving one unchecked never blocks the move, but it has to be acknowledged and is written into the task's history.</source>
+            </trans-unit>
+            <trans-unit id="criteria.item.title" xml:space="preserve">
+                <source>Criterion</source>
+            </trans-unit>
+            <trans-unit id="criteria.item.title.description" xml:space="preserve">
+                <source>Phrase it as something an editor can confirm, for example "All links checked".</source>
+            </trans-unit>
+            <trans-unit id="criteria.new" xml:space="preserve">
+                <source>Add acceptance criterion</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

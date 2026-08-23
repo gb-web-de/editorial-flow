@@ -1,11 +1,18 @@
 #
 # Editorial Flow owns six tables.
-# Because these tables do not have full TCA definitions, all base columns
-# (uid, pid, tstamp, crdate, deleted) are explicitly declared in this SQL schema.
-# The same absence means DeletedRestriction is a silent no-op for all of them -
-# every repository query filters `deleted` explicitly instead, see
+# Five of them have no TCA definition, so all base columns (uid, pid, tstamp,
+# crdate, deleted) are explicitly declared in this SQL schema. The same absence
+# means DeletedRestriction is a silent no-op for those five - every repository
+# query filters `deleted` explicitly instead, see
 # GbWeb\EditorialFlow\Domain\Repository\TaskChecklistRepository::findItemsForStage()
 # for the reasoning.
+#
+# The one exception is tx_editorialflow_stage_checklist_item: it has TCA
+# (Configuration/TCA/), because a stage's acceptance criteria are edited as an
+# inline relation on the sys_workspace_stage record, and FormEngine cannot
+# render a relation to a table it does not know. For that table DeletedRestriction
+# is real. The explicit conditions stay anyway - a query should say what it means
+# without the reader having to remember which table is the exception.
 #
 
 #
@@ -200,6 +207,10 @@ CREATE TABLE tx_editorialflow_activity (
 #
 # stage_uid follows the same convention tx_editorialflow_task.stage_uid does:
 # a real sys_workspace_stage uid, or one of core's fixed stage ids (0, -10, -20).
+# That split is also why workspace_uid is still here: for a real stage the uid is
+# globally unique and identifies the workspace on its own (this is what the inline
+# relation from sys_workspace_stage writes), while the three fixed ids repeat in
+# every workspace and only the pair tells them apart.
 #
 CREATE TABLE tx_editorialflow_stage_checklist_item (
     uid int(11) unsigned NOT NULL auto_increment,
@@ -247,4 +258,18 @@ CREATE TABLE tx_editorialflow_task_checklist_state (
     # insert-then-catch upsert in TaskChecklistRepository::setCompletion() relies
     # on this constraint existing to detect "a row is already there".
     UNIQUE KEY task_item (task, checklist_item)
+);
+
+#
+# The inline counter for the stage's acceptance criteria.
+#
+# Declared because the column is this extension's, not core's: core's own
+# sys_workspace.custom_stages is the same kind of field and is maintained the
+# same way - DataHandler writes the child count back onto the parent whenever the
+# relation is submitted through FormEngine. Nothing reads this value here (the
+# criteria are read by their own stage_uid, see TaskChecklistRepository), but a
+# `type: inline` field without a column of its own is not a valid relation.
+#
+CREATE TABLE sys_workspace_stage (
+    tx_editorialflow_criteria int(11) unsigned DEFAULT '0' NOT NULL
 );

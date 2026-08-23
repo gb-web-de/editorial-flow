@@ -807,6 +807,31 @@
                 <source>on this page, not edited yet</source>
                 <target>auf dieser Seite, noch nicht bearbeitet</target>
             </trans-unit>
+
+            <trans-unit id="criteria.table" xml:space="preserve">
+                <source>Acceptance criterion</source>
+                <target>Abnahmekriterium</target>
+            </trans-unit>
+            <trans-unit id="criteria.field" xml:space="preserve">
+                <source>Acceptance criteria</source>
+                <target>Abnahmekriterien</target>
+            </trans-unit>
+            <trans-unit id="criteria.field.description" xml:space="preserve">
+                <source>Editors are asked to confirm these before a task leaves this stage. Leaving one unchecked never blocks the move, but it has to be acknowledged and is written into the task's history.</source>
+                <target>Redakteurinnen und Redakteure werden danach gefragt, bevor eine Aufgabe diese Stufe verlässt. Ein offener Punkt blockiert den Wechsel nie, muss aber bestätigt werden und wird in der Historie der Aufgabe festgehalten.</target>
+            </trans-unit>
+            <trans-unit id="criteria.item.title" xml:space="preserve">
+                <source>Criterion</source>
+                <target>Kriterium</target>
+            </trans-unit>
+            <trans-unit id="criteria.item.title.description" xml:space="preserve">
+                <source>Phrase it as something an editor can confirm, for example "All links checked".</source>
+                <target>So formulieren, dass es bestätigt werden kann, zum Beispiel „Alle Links geprüft“.</target>
+            </trans-unit>
+            <trans-unit id="criteria.new" xml:space="preserve">
+                <source>Add acceptance criterion</source>
+                <target>Abnahmekriterium hinzufügen</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

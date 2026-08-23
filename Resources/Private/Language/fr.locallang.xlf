@@ -807,6 +807,31 @@
                 <source>on this page, not edited yet</source>
                 <target>sur cette page, pas encore modifié</target>
             </trans-unit>
+
+            <trans-unit id="criteria.table" xml:space="preserve">
+                <source>Acceptance criterion</source>
+                <target>Critère de validation</target>
+            </trans-unit>
+            <trans-unit id="criteria.field" xml:space="preserve">
+                <source>Acceptance criteria</source>
+                <target>Critères de validation</target>
+            </trans-unit>
+            <trans-unit id="criteria.field.description" xml:space="preserve">
+                <source>Editors are asked to confirm these before a task leaves this stage. Leaving one unchecked never blocks the move, but it has to be acknowledged and is written into the task's history.</source>
+                <target>Il est demandé aux rédacteurs de les confirmer avant qu'une tâche ne quitte cette étape. Un point non coché ne bloque jamais le déplacement, mais doit être confirmé et est inscrit dans l'historique de la tâche.</target>
+            </trans-unit>
+            <trans-unit id="criteria.item.title" xml:space="preserve">
+                <source>Criterion</source>
+                <target>Critère</target>
+            </trans-unit>
+            <trans-unit id="criteria.item.title.description" xml:space="preserve">
+                <source>Phrase it as something an editor can confirm, for example "All links checked".</source>
+                <target>À formuler comme quelque chose qu'un rédacteur peut confirmer, par exemple « Tous les liens vérifiés ».</target>
+            </trans-unit>
+            <trans-unit id="criteria.new" xml:space="preserve">
+                <source>Add acceptance criterion</source>
+                <target>Ajouter un critère de validation</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>
