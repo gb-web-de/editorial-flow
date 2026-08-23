@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Command;
 
+use GbWeb\EditorialFlow\Service\DemoEnvironmentSeeder;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -11,11 +12,6 @@ use Symfony\Component\Console\Input\InputOption;
 use Symfony\Component\Console\Output\OutputInterface;
 use Symfony\Component\Console\Style\SymfonyStyle;
 use TYPO3\CMS\Core\Core\Bootstrap;
-use TYPO3\CMS\Core\Database\Connection;
-use TYPO3\CMS\Core\Database\ConnectionPool;
-use TYPO3\CMS\Core\DataHandling\DataHandler;
-use TYPO3\CMS\Core\Utility\GeneralUtility;
-use TYPO3\CMS\Core\Utility\StringUtility;
 
 /**
  * Makes sure there is something to run the board against.
@@ -25,28 +21,33 @@ use TYPO3\CMS\Core\Utility\StringUtility;
  * images), which TYPO3 imports during `typo3 setup` when TYPO3_SETUP_DISTRIBUTION
  * is set. This command only verifies that import happened.
  *
- * What Camino cannot provide is a workspace with custom review stages, and without
- * those the board has only the two fixed core stages - the whole
- * Backlog -> In Progress -> Review -> Ready -> Done flow stays invisible. That is
- * what this creates - plus three backend users spanning the actual permission
- * spread an integrator will hit.
+ * What Camino cannot provide is workspaces with custom review stages, the
+ * uneven permission spread between real editorial roles, and the acceptance
+ * criteria a stage asks for. Without those, most of what this extension does is
+ * invisible: one workspace shows a single stage chain, and a board that merges
+ * several workspaces into one set of columns has nothing to merge.
  *
- * Core's own gate here (verified directly against
+ * Three workspaces, because each one makes a different thing visible:
+ *
+ *   Editorial - the full chain, Review then Approval, with criteria on Review.
+ *   Marketing - its own chain whose first stage is ALSO called "Review", which
+ *               is what BoardColumnRegistry merges into one column (it groups by
+ *               resolved title, not by uid), plus a "Legal" stage nothing else
+ *               has. One user is a member of both, so cross-workspace conflicts
+ *               have someone who can actually see both sides.
+ *   Quickfix  - no custom stages at all: Editing straight to "Ready to publish",
+ *               the path an installation without a review process takes.
+ *
+ * The permission spread is core's, not ours. Core's gate is
  * TYPO3\CMS\Workspaces\Hook\DataHandlerHook::version_setStage(), which calls
  * BackendUserAuthentication::workspaceCheckStageForCurrent($currentStage) - the
- * stage a record is LEAVING, not the one it is entering) means: whoever is
- * responsible for a stage may act on whatever currently sits there and send it
- * anywhere from there, including skipping stages ahead. It is not "may move
- * things into my stage", it is "may decide what happens to things already in my
- * stage". So: editor (responsible for Review) can act on anything sitting in
- * Review and send it onward; reviewer (responsible for Approval) likewise for
- * Approval; neither can act on the other's stage. Every member may always move
- * a record out of the default Editing stage (stage 0) - that part is not
- * role-specific. Only the workspace owner (approver) can act on records sitting
- * at "Ready to publish"/"Publish" or actually publish at all
- * (WorkspacePublishGate). None of this is a Editorial Flow rule - these demo
- * users exist to make core's own model visible on the board, not to route
- * around it.
+ * stage a record is LEAVING, not the one it is entering. Being responsible for a
+ * stage therefore means "may decide what happens to whatever currently sits
+ * there", including sending it straight past the next stage. Every member may
+ * always move a record out of the default Editing stage; only a workspace OWNER
+ * may act on "Ready to publish"/"Publish" or publish at all. These users exist to
+ * make that model visible on the board, not to route around it. See
+ * WORKSPACE-STAGES.md.
  *
  * Re-running is safe: existing data is kept unless the user explicitly says
  * otherwise. Recreating deletes a workspace and therefore any versions inside it,
@@ -54,30 +55,102 @@ use TYPO3\CMS\Core\Utility\StringUtility;
  */
 #[AsCommand(
     name: 'editorialflow:democontent',
-    description: 'Ensure demo content, a workspace with review stages, and demo backend users exist for the board.',
+    description: 'Ensure demo content, workspaces with review stages, and demo backend users exist for the board.',
 )]
 final class CreateDemoContentCommand extends Command
 {
-    private const WORKSPACE_TITLE = 'Editorial';
-    private const STAGE_TITLES = ['Review', 'Approval'];
     private const GROUP_TITLE = 'Editorial Flow Editors';
+    private const GROUP_MODULES = 'web_editorialflow,web_layout,file_list';
     private const DEMO_PASSWORD = 'Password.1';
 
     /**
-     * username => realName. "approver" is a workspace OWNER (full, unrestricted
-     * access including publish) - deliberately not "responsible for a stage"
-     * like the other two, because ownership is the one thing that grants acting
-     * on "Ready to publish"/"Publish" and publishing itself; a stage-level
-     * responsibility never grants that on its own.
+     * The demo workspaces, in board order.
+     *
+     * `responsible` maps a stage title to the users core will let act on records
+     * sitting in it. `criteria` seeds that stage's acceptance criteria, which the
+     * "Send to stage" dialog then asks about.
+     *
+     * @var array<string, array{description: string, stages: list<string>, owners: list<string>, members: list<string>, responsible: array<string, list<string>>, criteria: array<string, list<string>>}>
+     */
+    private const WORKSPACES = [
+        'Editorial' => [
+            'description' => 'The main editorial pipeline: draft, review, approval.',
+            'stages' => ['Review', 'Approval'],
+            'owners' => ['approver'],
+            'members' => ['editor', 'reviewer', 'both', 'stagelead'],
+            'responsible' => [
+                // `both` is responsible for a Review stage HERE and in Marketing:
+                // reviewing across workspaces is the normal case for a small
+                // editorial team, and it is the one the merged "Review" column is
+                // for - the same person acts on cards from either workspace
+                // without leaving the column they are looking at.
+                'Review' => ['editor', 'stagelead', 'both'],
+                'Approval' => ['reviewer', 'stagelead'],
+            ],
+            'criteria' => [
+                'Review' => [
+                    'All links checked',
+                    'Images have alt text',
+                    'Spelling and grammar checked',
+                ],
+                'Approval' => [
+                    'Facts confirmed with the department',
+                    'Publication date agreed',
+                ],
+            ],
+        ],
+        'Marketing' => [
+            'description' => 'Campaign pages. Shares the "Review" step with Editorial and adds a legal check.',
+            // "Review" on purpose: BoardColumnRegistry merges stages by resolved
+            // title, so this one shares a single board column with Editorial's.
+            'stages' => ['Review', 'Legal'],
+            'owners' => ['marketing'],
+            'members' => ['editor2', 'both', 'legal'],
+            'responsible' => [
+                'Review' => ['editor2', 'both'],
+                'Legal' => ['legal'],
+            ],
+            'criteria' => [
+                'Legal' => [
+                    'Claims are substantiated',
+                    'Imprint and privacy links present',
+                ],
+            ],
+        ],
+        'Quickfix' => [
+            'description' => 'Typos and small corrections. No review stages - Editing straight to publish.',
+            'stages' => [],
+            'owners' => ['approver'],
+            'members' => ['editor'],
+            'responsible' => [],
+            'criteria' => [],
+        ],
+    ];
+
+    /**
+     * username => [real name, what this user is here to make visible].
+     *
+     * Nine, because the interesting cases are the ones a single-workspace demo
+     * cannot produce: someone who reviews in two workspaces at once, someone
+     * responsible for two stages of the same one, an owner who is responsible for
+     * no stage, and someone with the module but no workspace at all.
+     *
+     * @var array<string, array{0: string, 1: string}>
      */
     private const DEMO_USERS = [
-        'editor' => 'Erin Editor',
-        'reviewer' => 'Rae Reviewer',
-        'approver' => 'Ana Approver',
+        'editor' => ['Erin Editor', 'Editorial + Quickfix member, responsible for Editorial\'s Review'],
+        'reviewer' => ['Rae Reviewer', 'Editorial member, responsible for Approval - cannot publish'],
+        'approver' => ['Ana Approver', 'Owner of Editorial and Quickfix: the only role that may publish'],
+        'editor2' => ['Eli Editor', 'Marketing member, responsible for Marketing\'s Review'],
+        'both' => ['Bo Both', 'Reviews in BOTH Editorial and Marketing - and sees both sides of a conflict'],
+        'legal' => ['Lex Legal', 'Marketing member, responsible for Legal only'],
+        'marketing' => ['Mo Marketing', 'Owner of Marketing, responsible for no stage of it'],
+        'stagelead' => ['Sam Stagelead', 'Responsible for BOTH Editorial stages at once'],
+        'observer' => ['Obi Observer', 'Has the module and page access, but no workspace at all'],
     ];
 
     public function __construct(
-        private readonly ConnectionPool $connectionPool,
+        private readonly DemoEnvironmentSeeder $seeder,
     ) {
         parent::__construct();
     }
@@ -88,7 +161,7 @@ final class CreateDemoContentCommand extends Command
             'force',
             'f',
             InputOption::VALUE_NONE,
-            'Recreate the demo workspace even if it exists. Deletes it and any versions inside it.',
+            'Recreate the demo workspaces even if they exist. Deletes them and any versions inside them.',
         );
     }
 
@@ -99,34 +172,27 @@ final class CreateDemoContentCommand extends Command
 
         $this->reportPageContent($io);
 
-        $existingWorkspaceUid = $this->findWorkspace();
-        if ($existingWorkspaceUid > 0) {
-            if (!$this->shouldRecreate($input, $io, $existingWorkspaceUid)) {
-                $io->success(sprintf('Kept existing workspace "%s" (uid %d).', self::WORKSPACE_TITLE, $existingWorkspaceUid));
-                $this->ensureDemoUsers($io, $existingWorkspaceUid);
-                return Command::SUCCESS;
+        $recreate = $this->shouldRecreate($input, $io);
+
+        $workspaceUids = [];
+        $stageUids = [];
+        foreach (self::WORKSPACES as $title => $definition) {
+            $workspaceUid = $this->ensureWorkspace($io, $title, $definition, $recreate);
+            if ($workspaceUid === 0) {
+                $io->error(sprintf('Could not create the demo workspace "%s".', $title));
+                return Command::FAILURE;
             }
-            $this->deleteWorkspace($existingWorkspaceUid);
-            $io->note(sprintf('Deleted workspace uid %d.', $existingWorkspaceUid));
+
+            $workspaceUids[$title] = $workspaceUid;
+            $stageUids[$title] = $this->seeder->ensureStages($workspaceUid, $definition['stages']);
+            $this->seedCriteria($io, $title, $workspaceUid, $stageUids[$title], $definition['criteria']);
         }
 
-        $stageUidsByTitle = [];
-        $workspaceUid = $this->createWorkspaceWithStages($stageUidsByTitle);
-        if ($workspaceUid === 0) {
-            $io->error('Could not create the demo workspace.');
-            return Command::FAILURE;
-        }
+        $userUids = $this->ensureDemoUsers($workspaceUids);
+        $this->wireMemberships($workspaceUids, $stageUids, $userUids);
+        $this->reportUsers($io, $userUids);
 
-        $io->success(sprintf(
-            'Created workspace "%s" (uid %d) with stages: %s.',
-            self::WORKSPACE_TITLE,
-            $workspaceUid,
-            implode(', ', self::STAGE_TITLES),
-        ));
-
-        $this->ensureDemoUsers($io, $workspaceUid, $stageUidsByTitle);
-
-        $io->writeln('Switch into the workspace, edit a demo page, and a task appears on the board.');
+        $io->writeln('Switch into a workspace, edit a demo page, and a task appears on the board.');
 
         return Command::SUCCESS;
     }
@@ -134,31 +200,176 @@ final class CreateDemoContentCommand extends Command
     /**
      * Decide whether to replace existing demo data.
      *
-     * When there is no TTY - which is the case for DDEV post-start hooks - Symfony
-     * Console falls back to the default, so the answer is "keep". Destroying an
-     * editor's workspace must never be the outcome of a non-interactive run.
+     * When there is no TTY - which is the case for DDEV post-start hooks -
+     * Symfony Console falls back to the default, so the answer is "keep".
+     * Destroying an editor's workspace must never be the outcome of a
+     * non-interactive run.
      */
-    private function shouldRecreate(InputInterface $input, SymfonyStyle $io, int $workspaceUid): bool
+    private function shouldRecreate(InputInterface $input, SymfonyStyle $io): bool
     {
         if ($input->getOption('force')) {
             return true;
         }
+
+        $existing = array_filter(
+            array_keys(self::WORKSPACES),
+            fn (string $title): bool => $this->seeder->findWorkspace($title) > 0,
+        );
+        if ($existing === []) {
+            return false;
+        }
+
         if (!$input->isInteractive()) {
-            $io->writeln(sprintf(
-                'Workspace "%s" (uid %d) already exists - keeping it.',
-                self::WORKSPACE_TITLE,
-                $workspaceUid,
-            ));
-            $io->writeln('  To recreate it: <info>ddev editorialflow-demo</info> (asks) or add <info>--force</info>.');
+            $io->writeln(sprintf('Workspaces already present - keeping them: %s.', implode(', ', $existing)));
+            $io->writeln('  To recreate: <info>ddev editorialflow-demo</info> (asks) or add <info>--force</info>.');
+
             return false;
         }
 
         $io->warning(sprintf(
-            'Workspace "%s" (uid %d) already exists. Recreating deletes it and every version inside it.',
-            self::WORKSPACE_TITLE,
-            $workspaceUid,
+            'These demo workspaces already exist: %s. Recreating deletes them and every version inside them.',
+            implode(', ', $existing),
         ));
-        return $io->confirm('Recreate the demo workspace?', false);
+
+        return $io->confirm('Recreate the demo workspaces?', false);
+    }
+
+    /**
+     * @param array{description: string, stages: list<string>, owners: list<string>, members: list<string>, responsible: array<string, list<string>>, criteria: array<string, list<string>>} $definition
+     */
+    private function ensureWorkspace(SymfonyStyle $io, string $title, array $definition, bool $recreate): int
+    {
+        $existing = $this->seeder->findWorkspace($title);
+        if ($existing > 0 && !$recreate) {
+            $io->writeln(sprintf('Kept workspace "%s" (uid %d).', $title, $existing));
+
+            return $existing;
+        }
+        if ($existing > 0) {
+            $this->seeder->deleteWorkspace($existing);
+            $io->note(sprintf('Deleted workspace "%s" (uid %d).', $title, $existing));
+        }
+
+        $workspaceUid = $this->seeder->createWorkspace($title, $definition['description']);
+        if ($workspaceUid > 0) {
+            $io->success(sprintf(
+                'Created workspace "%s" (uid %d)%s.',
+                $title,
+                $workspaceUid,
+                $definition['stages'] === []
+                    ? ' without custom stages'
+                    : ' with stages: ' . implode(', ', $definition['stages']),
+            ));
+        }
+
+        return $workspaceUid;
+    }
+
+    /**
+     * @param array<string, int> $stageUids
+     * @param array<string, list<string>> $criteria
+     */
+    private function seedCriteria(SymfonyStyle $io, string $workspaceTitle, int $workspaceUid, array $stageUids, array $criteria): void
+    {
+        foreach ($criteria as $stageTitle => $titles) {
+            $stageUid = $stageUids[$stageTitle] ?? 0;
+            if ($stageUid === 0) {
+                continue;
+            }
+
+            $added = $this->seeder->ensureCriteria($workspaceUid, $stageUid, $titles);
+            if ($added > 0) {
+                $io->writeln(sprintf(
+                    '  %s / %s: %d acceptance criteria.',
+                    $workspaceTitle,
+                    $stageTitle,
+                    $added,
+                ));
+            }
+        }
+    }
+
+    /**
+     * @param array<string, int> $workspaceUids
+     * @return array<string, int> username => uid
+     */
+    private function ensureDemoUsers(array $workspaceUids): array
+    {
+        $groupUid = $this->seeder->ensureGroup(self::GROUP_TITLE, self::GROUP_MODULES);
+        $this->seeder->grantPageAccessToGroup($groupUid);
+
+        $userUids = [];
+        foreach (self::DEMO_USERS as $username => [$realName]) {
+            $userUids[$username] = $this->seeder->ensureUser(
+                $username,
+                $realName,
+                $groupUid,
+                $this->primaryWorkspaceOf($username, $workspaceUids),
+                self::DEMO_PASSWORD,
+            );
+        }
+
+        return $userUids;
+    }
+
+    /**
+     * The workspace a user lands in on login: the first one they belong to at
+     * all. `observer` belongs to none and stays in Live, which is the case worth
+     * having in the demo - the board has to hold up for someone who cannot enter
+     * a workspace.
+     *
+     * @param array<string, int> $workspaceUids
+     */
+    private function primaryWorkspaceOf(string $username, array $workspaceUids): int
+    {
+        foreach (self::WORKSPACES as $title => $definition) {
+            if (in_array($username, $definition['owners'], true) || in_array($username, $definition['members'], true)) {
+                return $workspaceUids[$title] ?? 0;
+            }
+        }
+
+        return 0;
+    }
+
+    /**
+     * @param array<string, int> $workspaceUids
+     * @param array<string, array<string, int>> $stageUids
+     * @param array<string, int> $userUids
+     */
+    private function wireMemberships(array $workspaceUids, array $stageUids, array $userUids): void
+    {
+        foreach (self::WORKSPACES as $title => $definition) {
+            $workspaceUid = $workspaceUids[$title] ?? 0;
+            if ($workspaceUid === 0) {
+                continue;
+            }
+
+            $this->seeder->setWorkspaceMembers(
+                $workspaceUid,
+                $this->uidsOf($definition['members'], $userUids),
+                $this->uidsOf($definition['owners'], $userUids),
+            );
+
+            foreach ($definition['responsible'] as $stageTitle => $usernames) {
+                $stageUid = $stageUids[$title][$stageTitle] ?? 0;
+                if ($stageUid > 0) {
+                    $this->seeder->setStageResponsible($stageUid, $this->uidsOf($usernames, $userUids));
+                }
+            }
+        }
+    }
+
+    /**
+     * @param list<string> $usernames
+     * @param array<string, int> $userUids
+     * @return list<int>
+     */
+    private function uidsOf(array $usernames, array $userUids): array
+    {
+        return array_values(array_filter(array_map(
+            static fn (string $username): int => $userUids[$username] ?? 0,
+            $usernames,
+        )));
     }
 
     /**
@@ -167,399 +378,28 @@ final class CreateDemoContentCommand extends Command
      */
     private function reportPageContent(SymfonyStyle $io): void
     {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('pages');
-        $queryBuilder->getRestrictions()->removeAll();
-
-        $pageCount = (int)$queryBuilder
-            ->count('uid')
-            ->from('pages')
-            ->where($queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)))
-            ->executeQuery()
-            ->fetchOne();
-
+        $pageCount = $this->seeder->countPages();
         if ($pageCount === 0) {
             $io->warning(
                 'No pages found. The Camino demo site is imported by "typo3 setup" via '
                 . 'TYPO3_SETUP_DISTRIBUTION=theme_camino and requires typo3/cms-impexp.',
             );
+
             return;
         }
+
         $io->writeln(sprintf('Found %d page(s) - demo content is present.', $pageCount));
     }
 
-    private function findWorkspace(): int
-    {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('sys_workspace');
-        $queryBuilder->getRestrictions()->removeAll();
-
-        $uid = $queryBuilder
-            ->select('uid')
-            ->from('sys_workspace')
-            ->where(
-                $queryBuilder->expr()->eq('title', $queryBuilder->createNamedParameter(self::WORKSPACE_TITLE)),
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
-            ->setMaxResults(1)
-            ->executeQuery()
-            ->fetchOne();
-
-        return (int)($uid ?: 0);
-    }
-
-    private function deleteWorkspace(int $workspaceUid): void
-    {
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([], ['sys_workspace' => [$workspaceUid => ['delete' => 1]]]);
-        $dataHandler->process_cmdmap();
-    }
-
     /**
-     * A workspace with two custom stages between "Editing" and "Ready to publish".
-     *
-     * Written through DataHandler rather than direct INSERTs so the records are
-     * indistinguishable from hand-created ones - which matters here, because the
-     * extension's own auto-creation hook is exactly what we want to exercise.
-     *
-     * @param array<string, int> $stageUidsByTitle out parameter, filled with each
-     *        created stage's uid keyed by its title
+     * @param array<string, int> $userUids
      */
-    private function createWorkspaceWithStages(array &$stageUidsByTitle): int
+    private function reportUsers(SymfonyStyle $io, array $userUids): void
     {
-        $workspacePlaceholder = StringUtility::getUniqueId('NEW');
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([
-            'sys_workspace' => [
-                $workspacePlaceholder => [
-                    'pid' => 0,
-                    'title' => self::WORKSPACE_TITLE,
-                    'description' => 'Demo workspace created by editorial_flow',
-                ],
-            ],
-        ], []);
-        $dataHandler->process_datamap();
-
-        $workspaceUid = (int)($dataHandler->substNEWwithIDs[$workspacePlaceholder] ?? 0);
-        if ($workspaceUid === 0) {
-            return 0;
-        }
-
-        $stageData = ['sys_workspace_stage' => []];
-        $stagePlaceholders = [];
-        foreach (self::STAGE_TITLES as $stageTitle) {
-            $placeholder = StringUtility::getUniqueId('NEW');
-            $stagePlaceholders[$stageTitle] = $placeholder;
-            $stageData['sys_workspace_stage'][$placeholder] = [
-                'pid' => 0,
-                'parentid' => $workspaceUid,
-                'parenttable' => 'sys_workspace',
-                'title' => $stageTitle,
-            ];
-        }
-
-        $stageHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $stageHandler->start($stageData, []);
-        $stageHandler->process_datamap();
-
-        $stageUids = [];
-        foreach ($stagePlaceholders as $stageTitle => $placeholder) {
-            $stageUid = (int)($stageHandler->substNEWwithIDs[$placeholder] ?? 0);
-            if ($stageUid > 0) {
-                $stageUidsByTitle[$stageTitle] = $stageUid;
-                $stageUids[] = $stageUid;
-            }
-        }
-
-        $this->syncCustomStagesCounter($workspaceUid, $stageUids);
-
-        return $workspaceUid;
-    }
-
-    /**
-     * Both call sites (a fresh workspace above, or an existing one reused by
-     * ensureDemoUsers()) create/found their stages via a plain `parentid` write
-     * rather than submitting them through the workspace's own `custom_stages`
-     * IRRE field, so core never ran its usual "maintain the parent's child
-     * counter" step - the column can stay 0 even with real stages attached.
-     * That counter is not decorative: BackendUserAuthentication::
-     * workspaceCheckStageForCurrent() reads it to decide whether ANY per-stage
-     * responsible_persons check applies at all. Left at 0, a non-owner member
-     * can never enter a custom stage no matter what responsible_persons says -
-     * so this is corrected explicitly, the way a real IRRE submission on the
-     * parent would have, every time this command runs.
-     *
-     * @param list<int> $stageUids
-     */
-    private function syncCustomStagesCounter(int $workspaceUid, array $stageUids): void
-    {
-        if ($stageUids === []) {
-            return;
-        }
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([
-            'sys_workspace' => [
-                $workspaceUid => ['custom_stages' => implode(',', $stageUids)],
-            ],
-        ], []);
-        $dataHandler->process_datamap();
-    }
-
-    /**
-     * Create (or reuse) the three demo backend users and their group, and wire
-     * them into the workspace with a deliberately uneven permission spread -
-     * verified end to end against the real DataHandlerHook gate, not assumed:
-     *
-     *   editor    - workspace member, responsible for "Review" -> may act on a
-     *               task while it sits in Review and send it onward (including
-     *               straight to Approval or further - stage responsibility is
-     *               about what leaves your stage, not what enters it). Cannot
-     *               act on a task sitting in Approval. Any member, including
-     *               editor, may always move a task out of the default Editing
-     *               stage.
-     *   reviewer  - workspace member, responsible for "Approval" -> may act on
-     *               a task while it sits in Approval and send it onward.
-     *               Cannot act on a task sitting in Review. Cannot publish
-     *               (WorkspacePublishGate is owner-only, independent of stage
-     *               responsibility).
-     *   approver  - workspace OWNER -> the one role that can act on a task at
-     *               "Ready to publish"/"Publish" and actually publish; no
-     *               stage-level responsibility grants that on its own.
-     *
-     * @param array<string, int> $stageUidsByTitle
-     */
-    private function ensureDemoUsers(SymfonyStyle $io, int $workspaceUid, array $stageUidsByTitle = []): void
-    {
-        if ($stageUidsByTitle === []) {
-            $stageUidsByTitle = $this->findStagesForWorkspace($workspaceUid);
-        }
-        $this->syncCustomStagesCounter($workspaceUid, array_values($stageUidsByTitle));
-
-        $groupUid = $this->ensureDemoGroup();
-        $this->grantPageAccessToGroup($groupUid);
-
-        $userUids = [];
-        foreach (self::DEMO_USERS as $username => $realName) {
-            $userUids[$username] = $this->ensureUser($username, $realName, $groupUid, $workspaceUid);
-        }
-
-        $this->setWorkspaceMembersAndOwners($workspaceUid, $userUids);
-
-        if (isset($stageUidsByTitle['Review'])) {
-            $this->setStageResponsible($stageUidsByTitle['Review'], $userUids['editor']);
-        }
-        if (isset($stageUidsByTitle['Approval'])) {
-            $this->setStageResponsible($stageUidsByTitle['Approval'], $userUids['reviewer']);
-        }
-
         $io->section('Demo backend users');
-        $io->writeln('  Password for all three: ' . self::DEMO_PASSWORD);
-        foreach (self::DEMO_USERS as $username => $realName) {
-            $io->writeln(sprintf('  - %s (%s), uid %d', $username, $realName, $userUids[$username]));
+        $io->writeln('  Password for all of them: ' . self::DEMO_PASSWORD);
+        foreach (self::DEMO_USERS as $username => [$realName, $purpose]) {
+            $io->writeln(sprintf('  - %-10s uid %-4d %s - %s', $username, $userUids[$username] ?? 0, $realName, $purpose));
         }
-        $io->writeln('  editor -> can act on a task while it sits in Review (send it onward, even skipping ahead).');
-        $io->writeln('  reviewer -> can act on a task while it sits in Approval. Neither can act on the other\'s stage.');
-        $io->writeln('  approver -> workspace owner, can act on "Ready to publish" and actually publish.');
-    }
-
-    /**
-     * @return array<string, int> stage title => uid
-     */
-    private function findStagesForWorkspace(int $workspaceUid): array
-    {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('sys_workspace_stage');
-        $queryBuilder->getRestrictions()->removeAll();
-
-        $rows = $queryBuilder
-            ->select('uid', 'title')
-            ->from('sys_workspace_stage')
-            ->where(
-                $queryBuilder->expr()->eq('parentid', $queryBuilder->createNamedParameter($workspaceUid, Connection::PARAM_INT)),
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
-            ->executeQuery()
-            ->fetchAllAssociative();
-
-        $byTitle = [];
-        foreach ($rows as $row) {
-            $byTitle[(string)$row['title']] = (int)$row['uid'];
-        }
-        return $byTitle;
-    }
-
-    private function ensureDemoGroup(): int
-    {
-        // Every page permission check (BackendUserAuthentication::calcPerms())
-        // starts with isInWebMount() - without a mount pointing at the site,
-        // perms_groupid/perms_group are never even consulted, no matter how
-        // they are set. Mounted at the true page-tree root(s) - the site's own
-        // top-level pages (pid = 0) - so the whole demo site is reachable.
-        $values = [
-            'title' => self::GROUP_TITLE,
-            // The editorial_flow module itself, plus the two core modules an
-            // editor needs to reach a page and edit its content at all.
-            'groupMods' => 'web_editorialflow,web_layout,file_list',
-            'tables_select' => 'pages,tt_content,sys_file_reference,sys_category',
-            'tables_modify' => 'pages,tt_content,sys_file_reference,sys_category',
-            'db_mountpoints' => implode(',', $this->findRootPageUids()),
-        ];
-
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('be_groups');
-        $queryBuilder->getRestrictions()->removeAll();
-        $existing = $queryBuilder
-            ->select('uid')
-            ->from('be_groups')
-            ->where(
-                $queryBuilder->expr()->eq('title', $queryBuilder->createNamedParameter(self::GROUP_TITLE)),
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
-            ->setMaxResults(1)
-            ->executeQuery()
-            ->fetchOne();
-        if ($existing) {
-            $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-            $dataHandler->start(['be_groups' => [(int)$existing => $values]], []);
-            $dataHandler->process_datamap();
-            return (int)$existing;
-        }
-
-        $placeholder = StringUtility::getUniqueId('NEW');
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start(['be_groups' => [$placeholder => ['pid' => 0] + $values]], []);
-        $dataHandler->process_datamap();
-
-        return (int)($dataHandler->substNEWwithIDs[$placeholder] ?? 0);
-    }
-
-    /**
-     * @return list<int>
-     */
-    private function findRootPageUids(): array
-    {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('pages');
-        $queryBuilder->getRestrictions()->removeAll();
-
-        $rows = $queryBuilder
-            ->select('uid')
-            ->from('pages')
-            ->where(
-                $queryBuilder->expr()->eq('pid', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
-            ->executeQuery()
-            ->fetchAllAssociative();
-
-        return array_map(static fn (array $row): int => (int)$row['uid'], $rows);
-    }
-
-    /**
-     * Demo pages carry no `perms_groupid` (see `pages.perms_everybody = 0` in
-     * the Camino fixture), so without this no be_group has any page access at
-     * all - not a workspace concern, but the demo users would otherwise be
-     * unable to reach a single page. Applied to every existing page, not just
-     * the root: TYPO3 does not cascade page permissions to subpages on its own.
-     */
-    private function grantPageAccessToGroup(int $groupUid): void
-    {
-        if ($groupUid < 1) {
-            return;
-        }
-        $connection = $this->connectionPool->getConnectionForTable('pages');
-        $connection->update(
-            'pages',
-            [
-                'perms_groupid' => $groupUid,
-                // show, edit, delete, new-subpage, new-content - the same value
-                // the demo fixture already grants perms_user for uid 1.
-                'perms_group' => 31,
-            ],
-            ['deleted' => 0],
-        );
-    }
-
-    private function ensureUser(string $username, string $realName, int $groupUid, int $workspaceUid): int
-    {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('be_users');
-        $queryBuilder->getRestrictions()->removeAll();
-        $existing = $queryBuilder
-            ->select('uid')
-            ->from('be_users')
-            ->where(
-                $queryBuilder->expr()->eq('username', $queryBuilder->createNamedParameter($username)),
-                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
-            )
-            ->setMaxResults(1)
-            ->executeQuery()
-            ->fetchOne();
-
-        $values = [
-            'realName' => $realName,
-            'email' => $username . '@example.org',
-            'usergroup' => (string)$groupUid,
-            'workspace_id' => $workspaceUid,
-            'admin' => 0,
-            'disable' => 0,
-        ];
-
-        if ($existing) {
-            $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-            $dataHandler->start(['be_users' => [(int)$existing => $values]], []);
-            $dataHandler->process_datamap();
-            return (int)$existing;
-        }
-
-        $placeholder = StringUtility::getUniqueId('NEW');
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([
-            'be_users' => [
-                $placeholder => $values + [
-                    'pid' => 0,
-                    'username' => $username,
-                    'password' => self::DEMO_PASSWORD,
-                ],
-            ],
-        ], []);
-        $dataHandler->process_datamap();
-
-        return (int)($dataHandler->substNEWwithIDs[$placeholder] ?? 0);
-    }
-
-    /**
-     * @param array<string, int> $userUids username => uid
-     */
-    private function setWorkspaceMembersAndOwners(int $workspaceUid, array $userUids): void
-    {
-        $members = [];
-        $owners = [];
-        foreach ($userUids as $username => $uid) {
-            if ($uid < 1) {
-                continue;
-            }
-            if ($username === 'approver') {
-                $owners[] = 'be_users_' . $uid;
-            } else {
-                $members[] = 'be_users_' . $uid;
-            }
-        }
-
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([
-            'sys_workspace' => [
-                $workspaceUid => [
-                    'members' => implode(',', $members),
-                    'adminusers' => implode(',', $owners),
-                ],
-            ],
-        ], []);
-        $dataHandler->process_datamap();
-    }
-
-    private function setStageResponsible(int $stageUid, int $userUid): void
-    {
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([
-            'sys_workspace_stage' => [
-                $stageUid => ['responsible_persons' => 'be_users_' . $userUid],
-            ],
-        ], []);
-        $dataHandler->process_datamap();
     }
 }
