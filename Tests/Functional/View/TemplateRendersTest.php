@@ -341,6 +341,95 @@ final class TemplateRendersTest extends FunctionalTestCase
         self::assertStringNotContainsString('No comments yet', $output);
         // Core's rendered diff is shown, so the empty-state hint must NOT appear.
         self::assertStringNotContainsString('30 days', $output);
+        // Closing is offered here and only here - see the comment in the
+        // template for why it left the board card.
+        self::assertStringContainsString('data-editorialflow-close="1"', $output);
+    }
+
+    /**
+     * A closed task is an archive record. Offering to close it again would be a
+     * button whose only possible answer is `task-closed`.
+     */
+    #[Test]
+    public function aClosedTicketOffersNoCloseButton(): void
+    {
+        $output = $this->renderTicket(['closed' => 1, 'state' => 'done']);
+
+        self::assertStringNotContainsString('data-editorialflow-close', $output);
+    }
+
+    /**
+     * The board card deliberately does NOT offer closing: three buttons and an
+     * assignee in a 310px column pushed the footer onto three lines, and
+     * finishing a task is not the one-glance decision assigning yourself is.
+     */
+    #[Test]
+    public function theBoardCardDoesNotOfferClosing(): void
+    {
+        $output = $this->render([
+            'pageSelected' => true,
+            'workspaceUid' => 1,
+            'columns' => [
+                [
+                    'key' => 'stage-0',
+                    'label' => 'Editing',
+                    'state' => 'in_progress',
+                    'stageUid' => 0,
+                    'acceptsDrop' => true,
+                    'checklistItemsJson' => '[]',
+                    'cards' => [
+                        [
+                            'uid' => 1,
+                            'title' => 'About us',
+                            'state' => 'in_progress',
+                            'subject_table' => 'pages',
+                            'subject_uid' => 2,
+                            'workspace_uid' => 1,
+                            'stage_uid' => 0,
+                            'closed' => 0,
+                            'canAct' => true,
+                        ],
+                    ],
+                ],
+            ],
+        ]);
+
+        self::assertStringContainsString('editorialflow-card', $output);
+        self::assertStringNotContainsString('data-editorialflow-close', $output);
+    }
+
+    /**
+     * @param array<string, mixed> $taskOverrides
+     */
+    private function renderTicket(array $taskOverrides = []): string
+    {
+        $viewFactory = $this->get(ViewFactoryInterface::class);
+        $view = $viewFactory->create(new ViewFactoryData(
+            templateRootPaths: ['EXT:editorial_flow/Resources/Private/Templates/'],
+        ));
+        $view->assignMultiple([
+            'task' => array_merge([
+                'uid' => 1,
+                'state' => 'in_progress',
+                'priority' => 2,
+                'workspace_uid' => 1,
+                'stage_uid' => 0,
+                'auto_created' => 0,
+                'description' => '',
+                'subject_pid' => 2,
+                'closed' => 0,
+            ], $taskOverrides),
+            'subject' => ['table' => 'pages', 'uid' => 2, 'title' => 'About us'],
+            'assignee' => null,
+            'editUrl' => '/typo3/record/edit',
+            'members' => [],
+            'diffs' => [],
+            'timeline' => [],
+            'activities' => [],
+            'comments' => [],
+        ]);
+
+        return $view->render('EditorialFlow/Ticket');
     }
 
     /**

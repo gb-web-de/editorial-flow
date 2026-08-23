@@ -134,8 +134,11 @@ about whether this task is finished.
 **5. Somebody stops.** Not every task ends by going live. A draft gets discarded, the change
 turns out to be unnecessary, the record is published from somewhere else, or the work is
 simply abandoned — and none of those produce a publish event. So closing is also an explicit
-action an editor can take on **any** task, in any state, from the card or the ticket
-(`TaskAjaxController::closeTaskAction()`).
+action an editor can take on **any** task, in any state, from its ticket
+(`TaskAjaxController::closeTaskAction()`). Offered there rather than on the board card:
+three buttons and an assignee in a 310px column pushed the card footer onto three lines, and
+finishing a task is not the one-glance decision assigning yourself is. Every card opens its
+ticket from the title, and a refusal's own offer opens the dialog directly.
 
 Its precondition chain is almost empty on purpose. Every check that can refuse a close
 recreates the trap the action exists to remove: before it, a task whose version had been

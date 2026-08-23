@@ -27,6 +27,22 @@
             <a href="{editUrl}" class="btn btn-default btn-sm">
                 <core:icon identifier="actions-open" size="small" /> Edit record
             </a>
+            <f:comment>
+                The only place closing is offered from.
+
+                It was on the board card too, next to Publish, which put three
+                buttons and an assignee into a 310px column and pushed the
+                footer onto three lines. Finishing a task is also not a
+                one-glance decision the way assigning yourself is: the dialog
+                behind this asks what should happen to unpublished work, and the
+                ticket is where an editor is already looking at what that work
+                is.
+
+                Still always reachable - every card opens its ticket from the
+                title - and the offer attached to a refused action
+                (TaskActionResolution, see refusal.js) opens the dialog directly
+                without going through here at all.
+            </f:comment>
             <f:if condition="!{task.closed}">
                 <button type="button" class="btn btn-default btn-sm editorialflow-action-close"
                         data-editorialflow-close="{task.uid}" data-task-title="{task.title}">
