@@ -6,6 +6,7 @@ namespace GbWeb\EditorialFlow\EventListener;
 
 use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
 use GbWeb\EditorialFlow\Service\ActivityLogger;
+use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use TYPO3\CMS\Core\Attribute\AsEventListener;
 use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
@@ -35,6 +36,7 @@ final class CloseTaskAfterPublishListener
         private readonly TaskRepository $taskRepository,
         private readonly TaskMemberSynchronizer $memberSynchronizer,
         private readonly ActivityLogger $activityLogger,
+        private readonly TaskEventPublisher $taskEventPublisher,
     ) {
     }
 
@@ -96,6 +98,11 @@ final class CloseTaskAfterPublishListener
             'table' => $event->getTable(),
             'liveUid' => $event->getRecordId(),
         ]);
+
+        // 'published', not 'manual': nobody decided to close this, it ran out of
+        // pending work. An external board usually says something different about
+        // the two even though it moves the card either way.
+        $this->taskEventPublisher->taskClosed($task, 'published', $beUserId);
     }
 
     private function getBackendUser(): ?BackendUserAuthentication

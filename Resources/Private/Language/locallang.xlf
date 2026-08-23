@@ -726,6 +726,18 @@
             <trans-unit id="criteria.confirm.back" xml:space="preserve">
                 <source>Back to the criteria</source>
             </trans-unit>
+
+            <!-- Shown in Administration > Integrations > Webhooks when an
+                 administrator picks what a webhook should react to. -->
+            <trans-unit id="webhook.taskCreated" xml:space="preserve">
+                <source>Editorial Flow: a task was created</source>
+            </trans-unit>
+            <trans-unit id="webhook.taskStageChanged" xml:space="preserve">
+                <source>Editorial Flow: a task moved to another stage</source>
+            </trans-unit>
+            <trans-unit id="webhook.taskClosed" xml:space="preserve">
+                <source>Editorial Flow: a task was closed</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

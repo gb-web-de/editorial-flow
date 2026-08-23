@@ -34,12 +34,18 @@
         "typo3/cms-impexp": "^14.3",
         "typo3/cms-install": "^14.3",
         "typo3/cms-lowlevel": "^14.3",
+        "typo3/cms-reactions": "^14.3",
         "typo3/cms-rte-ckeditor": "^14.3",
         "typo3/cms-scheduler": "^14.3",
         "typo3/cms-setup": "^14.3",
         "typo3/cms-styleguide": "^14.0",
+        "typo3/cms-webhooks": "^14.3",
         "typo3/testing-framework": "^9.5",
         "typo3/theme-camino": "^14.3"
+    },
+    "suggest": {
+        "typo3/cms-webhooks": "Sends task events (created, stage changed, closed) to external systems such as Jira or Trello. The message types are always present - they need nothing but typo3/cms-core - and become configurable in Administration > Integrations > Webhooks as soon as this is installed.",
+        "typo3/cms-reactions": "Accepts task updates from external systems through an incoming webhook. Required for GbWeb\\EditorialFlow\\Reaction\\TaskReaction, which is registered only when this is installed."
     },
     "autoload": {
         "psr-4": {

@@ -77,12 +77,24 @@ CREATE TABLE tx_editorialflow_task (
     closed_by int(11) unsigned DEFAULT '0' NOT NULL,
 
     comments int(11) unsigned DEFAULT '0' NOT NULL,
+
+    # Where this task came from, or corresponds to, in a system that is not
+    # TYPO3 - a Jira issue, a Trello card. Set by the incoming reaction
+    # (GbWeb\EditorialFlow\Reaction\TaskReaction) and carried back out on every
+    # webhook, which is what makes the two ends able to find each other again
+    # instead of creating a duplicate on every round trip. Empty for a task
+    # planned in TYPO3 and nowhere else, which is the normal case.
+    external_system varchar(64) DEFAULT '' NOT NULL,
+    external_ref varchar(255) DEFAULT '' NOT NULL,
+    external_url varchar(2048) DEFAULT '' NOT NULL,
+
     tstamp int(11) unsigned DEFAULT '0' NOT NULL,
     crdate int(11) unsigned DEFAULT '0' NOT NULL,
     deleted tinyint(4) unsigned DEFAULT '0' NOT NULL,
 
     PRIMARY KEY (uid),
     KEY board_scope (subject_pid, closed, state),
+    KEY external (external_system, external_ref),
     KEY subject (subject_table, subject_uid, closed),
     KEY assignee (assignee, closed)
 );

@@ -45,6 +45,7 @@ final class TaskAutoCreationService
         private readonly StageTransitionService $stageTransitionService,
         private readonly CommentRepository $commentRepository,
         private readonly ActiveTaskSession $activeTaskSession,
+        private readonly TaskEventPublisher $taskEventPublisher,
     ) {
     }
 
@@ -426,6 +427,14 @@ final class TaskAutoCreationService
                 'subjectUid' => $subject['uid'],
                 'unplanned' => true,
             ]);
+            // Announced with autoCreated: true, which is the difference an
+            // external board needs - a card somebody planned is worth a ticket
+            // over there, a task that opened itself because an editor started
+            // typing usually is not.
+            $this->taskEventPublisher->taskCreated(
+                $this->taskRepository->findByUid($taskUid) ?? $task,
+                $beUserId,
+            );
         }
 
         // The edited record may still be unclaimed - a record created after the last

@@ -34,6 +34,7 @@ final class StageTransitionService
         private readonly TaskRepository $taskRepository,
         private readonly CommentRepository $commentRepository,
         private readonly ActivityLogger $activityLogger,
+        private readonly TaskEventPublisher $taskEventPublisher,
     ) {
     }
 
@@ -147,6 +148,15 @@ final class StageTransitionService
         if ($acceptanceRecord !== null) {
             $this->commentRepository->add($taskUid, $acceptanceRecord, $beUserId, $activityUid);
         }
+
+        // Last, and only here: core has accepted the move and our own row now
+        // agrees with it. Announcing a transition core went on to refuse would
+        // leave an external board holding a card TYPO3 never moved.
+        $this->taskEventPublisher->taskStageChanged(
+            $task,
+            $this->taskRepository->findByUid($taskUid) ?? $task,
+            $beUserId,
+        );
     }
 
     /**

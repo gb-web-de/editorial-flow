@@ -873,6 +873,19 @@
                 <source>Back to the criteria</source>
                 <target>Zurück zu den Kriterien</target>
             </trans-unit>
+
+            <trans-unit id="webhook.taskCreated" xml:space="preserve">
+                <source>Editorial Flow: a task was created</source>
+                <target>Editorial Flow: Eine Aufgabe wurde angelegt</target>
+            </trans-unit>
+            <trans-unit id="webhook.taskStageChanged" xml:space="preserve">
+                <source>Editorial Flow: a task moved to another stage</source>
+                <target>Editorial Flow: Eine Aufgabe hat die Stufe gewechselt</target>
+            </trans-unit>
+            <trans-unit id="webhook.taskClosed" xml:space="preserve">
+                <source>Editorial Flow: a task was closed</source>
+                <target>Editorial Flow: Eine Aufgabe wurde geschlossen</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

@@ -19,6 +19,7 @@ use GbWeb\EditorialFlow\Service\RecordCreationTargetProvider;
 use GbWeb\EditorialFlow\Service\ReferenceInspector;
 use GbWeb\EditorialFlow\Service\StageTransitionService;
 use GbWeb\EditorialFlow\Service\TaskColor;
+use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
@@ -63,6 +64,7 @@ final class TaskAjaxController
         private readonly WorkspaceIntegrationService $workspaceService,
         private readonly WorkspacePublishGate $workspacePublishGate,
         private readonly StageTransitionService $stageTransitionService,
+        private readonly TaskEventPublisher $taskEventPublisher,
         private readonly StagesService $stagesService,
         private readonly UriBuilder $uriBuilder,
         private readonly ViewFactoryInterface $viewFactory,
@@ -100,6 +102,12 @@ final class TaskAjaxController
         $startDate = $this->parseDate($body['startDate'] ?? null);
         $dueDate = $this->parseDate($body['dueDate'] ?? null);
 
+        // Asked before, the same way TaskAutoCreationService does: the repository
+        // answers with an existing open task without saying so, and announcing
+        // "a task was created" for one that has been on the board for a week
+        // would put a duplicate ticket on whatever is listening.
+        $isNew = $this->taskRepository->findOpenBySubject($table, $uid) === null;
+
         $task = $this->taskRepository->findOrCreateOpenForSubject($table, $uid, [
             'title' => $title !== '' ? $title : $this->deriveTitle($table, $uid),
             'description' => $description,
@@ -128,6 +136,13 @@ final class TaskAjaxController
         // genuinely just applied.
         if ((int)$task['assignee'] === $assignee) {
             $this->notifyAssignment($taskUid, (string)$task['title'], $table, $uid, $assignee);
+        }
+
+        if ($isNew) {
+            $this->taskEventPublisher->taskCreated(
+                $this->taskRepository->findByUid($taskUid) ?? $task,
+                (int)($this->getBackendUser()->user['uid'] ?? 0),
+            );
         }
 
         return new JsonResponse([
@@ -1794,6 +1809,8 @@ final class TaskAjaxController
             'discarded' => $discarded,
             'keptPending' => $this->describePendingPairs($pending),
         ]);
+
+        $this->taskEventPublisher->taskClosed($task, 'manual', $beUserId);
 
         return new JsonResponse([
             'success' => true,

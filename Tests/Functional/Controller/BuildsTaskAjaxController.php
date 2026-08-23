@@ -16,6 +16,7 @@ use GbWeb\EditorialFlow\Service\PendingSubjectHandoff;
 use GbWeb\EditorialFlow\Service\RecordCreationTargetProvider;
 use GbWeb\EditorialFlow\Service\ReferenceInspector;
 use GbWeb\EditorialFlow\Service\StageTransitionService;
+use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
@@ -86,6 +87,7 @@ trait BuildsTaskAjaxController
             ),
             $this->get(WorkspacePublishGate::class),
             $this->get(StageTransitionService::class),
+            $this->get(TaskEventPublisher::class),
             $this->get(StagesService::class),
             $this->get(UriBuilder::class),
             $this->get(ViewFactoryInterface::class),
