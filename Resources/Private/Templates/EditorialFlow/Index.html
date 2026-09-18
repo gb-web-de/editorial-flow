@@ -294,12 +294,16 @@
                                             </f:then>
                                         </f:if>
                                         <f:comment>
-                                            `!{card.closed}` is not redundant since close() stopped
-                                            zeroing workspace_uid: an archived card keeps the workspace
-                                            it was finished in, and without this it would grow a Publish
-                                            button for work that already went live.
+                                            One flag, decided in TaskPublishGate and nowhere else: this
+                                            card has a pending version, in this workspace, not yet live,
+                                            and this user may take it live from the stage it sits in.
+                                            The button is absent rather than disabled whenever any of
+                                            that fails - unlike the other card actions, publishing has
+                                            an entire workflow behind whether it is offered at all, and
+                                            a permanently greyed-out button on every card in every early
+                                            stage reads as breakage, not as guidance.
                                         </f:comment>
-                                        <f:if condition="{card.workspace_uid} > 0 && !{card.foreignWorkspace} && !{card.closed}">
+                                        <f:if condition="{card.canPublish}">
                                             <button type="button" class="btn btn-xs btn-primary editorialflow-action-publish"
                                                     data-task-uid="{card.uid}" data-task-title="{card.title}">
                                                 <core:icon identifier="actions-cloud-upload" size="small" /> Publish

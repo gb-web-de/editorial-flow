@@ -13,19 +13,12 @@ import { notifyRefusal } from '@gb-web/editorial-flow/task/refusal.js';
 import { openCloseDialog } from '@gb-web/editorial-flow/task/close.js';
 
 export function registerPublishButtons(board) {
-  const canPublish = TYPO3.settings.EditorialFlow?.canPublish === true;
-
+  // No permission check here any more. The view renders a Publish button only
+  // for cards TaskPublishGate cleared, so every button that exists is one this
+  // user may press - there is no "disabled publish" state left to represent.
+  // The endpoint asks the same gate again regardless: this is a rendering
+  // decision, never the access control.
   document.querySelectorAll('.editorialflow-action-publish').forEach((btn) => {
-    if (!canPublish) {
-      // Greyed out, not hidden: an editor should see that publishing exists
-      // and why it is unavailable to them, not wonder if the feature is
-      // missing - the same "always icon and label, never silence" rule
-      // ARCHITECTURE.md sets for status coloring applies to disabled actions.
-      btn.disabled = true;
-      btn.title = 'You are not allowed to publish in this workspace.';
-      return;
-    }
-
     btn.addEventListener('click', async (event) => {
       event.stopPropagation();
       const taskUid = parseInt(btn.dataset.taskUid || '0', 10);

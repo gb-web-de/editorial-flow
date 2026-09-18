@@ -39,7 +39,10 @@ describe('publishing a task', () => {
 
     global.TYPO3 = {
       settings: {
-        EditorialFlow: { canPublish: true },
+        // No canPublish setting any more: the view only renders a button for
+        // cards TaskPublishGate cleared, so a button in the DOM is by
+        // definition one this user may press.
+        EditorialFlow: {},
         ajaxUrls: { editorialflow_task_publish: '/publish' },
       },
     }

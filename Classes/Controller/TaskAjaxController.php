@@ -21,6 +21,7 @@ use GbWeb\EditorialFlow\Service\StageTransitionService;
 use GbWeb\EditorialFlow\Service\TaskColor;
 use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
+use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
 use GbWeb\EditorialFlow\Service\WorkspaceIntegrationService;
@@ -39,7 +40,6 @@ use TYPO3\CMS\Core\Type\Bitmask\Permission;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Core\View\ViewFactoryData;
 use TYPO3\CMS\Core\View\ViewFactoryInterface;
-use TYPO3\CMS\Workspaces\Authorization\WorkspacePublishGate;
 use TYPO3\CMS\Workspaces\Preview\PreviewUriBuilder;
 use TYPO3\CMS\Workspaces\Service\StagesService;
 
@@ -62,7 +62,7 @@ final class TaskAjaxController
         private readonly RecordCreationTargetProvider $recordCreationTargetProvider,
         private readonly AssignmentNotificationService $assignmentNotificationService,
         private readonly WorkspaceIntegrationService $workspaceService,
-        private readonly WorkspacePublishGate $workspacePublishGate,
+        private readonly TaskPublishGate $taskPublishGate,
         private readonly StageTransitionService $stageTransitionService,
         private readonly TaskEventPublisher $taskEventPublisher,
         private readonly StagesService $stagesService,
@@ -1576,10 +1576,15 @@ final class TaskAjaxController
      * makes it an explicit, confirmed action instead of something a slightly
      * off-target drop could trigger (ARCHITECTURE.md).
      *
-     * Gated by WorkspacePublishGate, the same check core's own
-     * WorkspacesAjaxController::publishSingleRecord() uses: owner/admin only,
-     * independent of stage `responsible_persons` - reaching the final stage
-     * never implies permission to actually publish.
+     * Gated by TaskPublishGate, which asks both halves of core's own rule: the
+     * role question WorkspacePublishGate answers (owner/admin only, independent
+     * of stage `responsible_persons` - reaching the final stage never implies
+     * permission to actually publish), AND the workspace's
+     * PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE bit, which decides whether an
+     * otherwise permitted user may go live from an early stage at all.
+     *
+     * Asking only the first half was how a task could be published straight out
+     * of the edit stage, skipping every review the workspace defines.
      *
      * Closing the task once everything is live is not done here:
      * CloseTaskAfterPublishListener does it off core's own
@@ -1605,11 +1610,16 @@ final class TaskAjaxController
             );
         }
 
-        if (!$this->workspacePublishGate->isGranted($this->getBackendUser(), $workspaceUid)) {
+        // Same gate the board rendered the button from. Asked again here because
+        // the button's absence is a UI decision and this endpoint is reachable
+        // without it - and because the stage can have moved on since the board
+        // was rendered.
+        $stageUid = (int)($task['stage_uid'] ?? 0);
+        if (!$this->taskPublishGate->isGranted($this->getBackendUser(), $workspaceUid, $stageUid)) {
             return $this->reject(
                 'publish-not-permitted',
-                'You are not allowed to publish in this workspace.',
-                ['taskUid' => $taskUid, 'workspaceUid' => $workspaceUid],
+                'You are not allowed to publish this task from the stage it is in.',
+                ['taskUid' => $taskUid, 'workspaceUid' => $workspaceUid, 'stageUid' => $stageUid],
             );
         }
 

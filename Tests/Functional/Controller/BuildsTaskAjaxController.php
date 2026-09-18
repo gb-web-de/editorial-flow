@@ -18,6 +18,7 @@ use GbWeb\EditorialFlow\Service\ReferenceInspector;
 use GbWeb\EditorialFlow\Service\StageTransitionService;
 use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
+use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
 use GbWeb\EditorialFlow\Service\WorkspaceIntegrationService;
@@ -85,7 +86,10 @@ trait BuildsTaskAjaxController
                 $this->get(TcaSchemaFactory::class),
                 $this->get(DiffUtility::class),
             ),
-            $this->get(WorkspacePublishGate::class),
+            // Constructed rather than fetched: TaskPublishGate is private like
+            // every other service of this extension, and the core gate it wraps
+            // is public already.
+            new TaskPublishGate($this->get(WorkspacePublishGate::class)),
             $this->get(StageTransitionService::class),
             $this->get(TaskEventPublisher::class),
             $this->get(StagesService::class),

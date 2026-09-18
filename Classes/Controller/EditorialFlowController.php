@@ -9,6 +9,7 @@ use GbWeb\EditorialFlow\Service\ActiveTaskSession;
 use GbWeb\EditorialFlow\Service\AssignableUserProvider;
 use GbWeb\EditorialFlow\Service\BoardColumnRegistry;
 use GbWeb\EditorialFlow\Service\BoardScopeResolver;
+use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
 use Psr\Http\Message\ResponseInterface;
@@ -20,7 +21,6 @@ use TYPO3\CMS\Core\Authentication\BackendUserAuthentication;
 use TYPO3\CMS\Core\Localization\LanguageService;
 use TYPO3\CMS\Core\Page\PageRenderer;
 use TYPO3\CMS\Extbase\Mvc\Controller\ActionController;
-use TYPO3\CMS\Workspaces\Authorization\WorkspacePublishGate;
 use TYPO3\CMS\Workspaces\Service\WorkspaceService;
 
 /**
@@ -40,7 +40,7 @@ final class EditorialFlowController extends ActionController
         protected readonly TaskRepository $taskRepository,
         protected readonly TaskSubjectRegistry $subjectRegistry,
         protected readonly UriBuilder $backendUriBuilder,
-        protected readonly WorkspacePublishGate $workspacePublishGate,
+        protected readonly TaskPublishGate $taskPublishGate,
         protected readonly BoardScopeResolver $boardScopeResolver,
         protected readonly WorkspaceService $workspaceService,
         protected readonly AssignableUserProvider $assignableUserProvider,
@@ -154,16 +154,6 @@ final class EditorialFlowController extends ActionController
             'EditorialFlow',
             'currentPageId',
             $pageUid,
-        );
-        // One flag for the whole board, not per card: a backend user is in
-        // exactly one workspace at a time, and WorkspacePublishGate::isGranted()
-        // returns true unconditionally for the live workspace (uid 0) - matching
-        // that a task can only ever hold a real pending version once its own
-        // workspace_uid is set to this same current workspace.
-        $this->pageRenderer->addInlineSetting(
-            'EditorialFlow',
-            'canPublish',
-            $workspaceUid > 0 && $this->workspacePublishGate->isGranted($backendUser, $workspaceUid),
         );
         return $moduleTemplate->renderResponse('EditorialFlow/Index');
     }
@@ -279,6 +269,7 @@ final class EditorialFlowController extends ActionController
                 $foreignWorkspaceRecord = BackendUtility::getRecord('sys_workspace', $taskWorkspaceUid, 'title');
                 $task['foreignWorkspaceTitle'] = $foreignWorkspaceRecord['title'] ?? ('#' . $taskWorkspaceUid);
                 $task['canAct'] = false;
+                $task['canPublish'] = false;
                 return $task;
             }
 
@@ -299,6 +290,19 @@ final class EditorialFlowController extends ActionController
             // it for "anyone may act here". Editorial Flow deliberately adds no
             // parallel permission model of its own on top of it.
             $task['canAct'] = $backendUser->workspaceCheckStageForCurrent((int)($task['stage_uid'] ?? 0));
+
+            // Per card, not per board: with the workspace's
+            // PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE bit set, the answer differs
+            // between two cards of the same board, because it depends on the
+            // stage each of them sits in. The view renders the Publish button
+            // from this flag alone, and publishTaskAction() refuses on the same
+            // gate - so a button that is there is a button that works.
+            $task['canPublish'] = (int)($task['closed'] ?? 0) === 0
+                && $this->taskPublishGate->isGranted(
+                    $backendUser,
+                    $taskWorkspaceUid,
+                    (int)($task['stage_uid'] ?? 0),
+                );
             return $task;
         }, $tasks);
 
