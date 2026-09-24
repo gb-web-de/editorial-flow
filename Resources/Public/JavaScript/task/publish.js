@@ -53,6 +53,9 @@ export function registerPublishButtons(board) {
         return;
       }
       board?.announce(taskTitle + ' published.');
+      // The top-bar Approvals list lives in the outer frame; let it drop the entry.
+      const topDocument = window.top?.document || document;
+      topDocument.dispatchEvent(new topDocument.defaultView.CustomEvent('editorialflow:task-published', { detail: { taskUid } }));
       Notification.success('Editorial Flow', taskTitle + ' published.' + (result.closed ? ' Task closed.' : ''));
       window.location.reload();
     });
@@ -73,7 +76,7 @@ export function registerPublishButtons(board) {
  * @returns {object|null} the decoded answer, or null once a genuine transport
  *          failure has been reported - the caller only handles answers it got.
  */
-async function postPublish(taskUid) {
+export async function postPublish(taskUid) {
   try {
     const response = await new AjaxRequest(TYPO3.settings.ajaxUrls.editorialflow_task_publish)
       .post({ task: taskUid });

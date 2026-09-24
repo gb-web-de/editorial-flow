@@ -5,6 +5,10 @@ declare(strict_types=1);
 namespace GbWeb\EditorialFlow\Tests\Functional\Controller;
 
 use GbWeb\EditorialFlow\Controller\TaskAjaxController;
+use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
+use GbWeb\EditorialFlow\Service\ReviewInbox;
+use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
+use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
 use GbWeb\EditorialFlow\Service\WorkspaceAccessDenied;
 use PHPUnit\Framework\Attributes\Test;
@@ -15,6 +19,7 @@ use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Http\ServerRequest;
 use TYPO3\CMS\Core\Localization\LanguageServiceFactory;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
+use TYPO3\CMS\Workspaces\Authorization\WorkspacePublishGate;
 use TYPO3\CMS\Workspaces\Service\StagesService;
 use TYPO3\CMS\Workspaces\Service\WorkspaceService;
 use TYPO3\TestingFramework\Core\Functional\FunctionalTestCase;
@@ -307,6 +312,61 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
         $scope->run($GLOBALS['BE_USER'], self::TEAM_B, static fn (): bool => true);
     }
 
+    /**
+     * The top-bar Approvals list: the coach sits in Team A and sees Team B's
+     * post waiting for them, with a Publish button - the same gate as the
+     * board's.
+     */
+    #[Test]
+    public function theApprovalsListShowsWorkFromEveryWorkspaceOfTheCoach(): void
+    {
+        $taskUid = $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->sitIn(self::TEAM_A);
+
+        $entries = $this->reviewInbox()->forUser($GLOBALS['BE_USER'], [self::TEAM_A, self::TEAM_B]);
+
+        self::assertCount(1, $entries);
+        self::assertSame($taskUid, $entries[0]['uid']);
+        self::assertSame('Team B', $entries[0]['workspaceTitle']);
+        self::assertTrue($entries[0]['canPublish']);
+    }
+
+    #[Test]
+    public function theApprovalsListIsEmptyOnceThePostIsLive(): void
+    {
+        $taskUid = $this->draftInWorkspace(self::TEAM_B, 'About us (live now)');
+        $this->sitIn(0);
+        $this->subject()->publishTaskAction($this->post(['task' => $taskUid]));
+
+        self::assertSame([], $this->reviewInbox()->forUser($GLOBALS['BE_USER'], [self::TEAM_A, self::TEAM_B]));
+    }
+
+    /**
+     * A plain member (a player writing the post) has nothing to approve:
+     * they may not publish, and Editing is not a review stage.
+     */
+    #[Test]
+    public function aPlainMemberHasNothingToApprove(): void
+    {
+        $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->getConnectionPool()->getConnectionForTable('sys_workspace')
+            ->update('sys_workspace', ['adminusers' => '', 'members' => 'be_groups_50'], ['uid' => self::TEAM_B]);
+        $this->setUpBackendUser(self::COACH);
+
+        self::assertSame([], $this->reviewInbox()->forUser($GLOBALS['BE_USER'], [self::TEAM_B]));
+    }
+
+    #[Test]
+    public function someoneOutsideTheWorkspaceSeesNothingOfIt(): void
+    {
+        $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->getConnectionPool()->getConnectionForTable('sys_workspace')
+            ->update('sys_workspace', ['adminusers' => ''], ['uid' => self::TEAM_B]);
+        $this->setUpBackendUser(self::COACH);
+
+        self::assertSame([], $this->reviewInbox()->forUser($GLOBALS['BE_USER'], [self::TEAM_B]));
+    }
+
     private function draftInWorkspace(int $workspaceUid, string $title): int
     {
         $this->sitIn($workspaceUid);
@@ -363,6 +423,19 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
         return $queryBuilder->select('*')->from('pages')
             ->where($queryBuilder->expr()->eq('uid', $uid))
             ->executeQuery()->fetchAssociative() ?: [];
+    }
+
+    private function reviewInbox(): ReviewInbox
+    {
+        $context = $this->get(Context::class);
+
+        return new ReviewInbox(
+            $this->get(TaskRepository::class),
+            $this->get(TaskMemberSynchronizer::class),
+            new TaskPublishGate($this->get(WorkspacePublishGate::class), new TaskWorkspaceScope($context)),
+            new TaskWorkspaceScope($context),
+            $this->get(StagesService::class),
+        );
     }
 
     private function subject(): TaskAjaxController

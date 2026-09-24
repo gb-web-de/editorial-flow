@@ -900,6 +900,46 @@
                 <source>another workspace</source>
                 <target>un autre espace de travail</target>
             </trans-unit>
+            <trans-unit id="inbox.title" xml:space="preserve">
+                <source>Approvals</source>
+                <target>Validations</target>
+            </trans-unit>
+            <trans-unit id="inbox.empty" xml:space="preserve">
+                <source>Nothing is waiting for you.</source>
+                <target>Rien ne vous attend.</target>
+            </trans-unit>
+            <trans-unit id="inbox.preview" xml:space="preserve">
+                <source>Preview</source>
+                <target>Aperçu</target>
+            </trans-unit>
+            <trans-unit id="inbox.publish" xml:space="preserve">
+                <source>Publish</source>
+                <target>Publier</target>
+            </trans-unit>
+            <trans-unit id="inbox.board" xml:space="preserve">
+                <source>Open board</source>
+                <target>Ouvrir le tableau</target>
+            </trans-unit>
+            <trans-unit id="inbox.confirm.title" xml:space="preserve">
+                <source>Publish "%1$s"?</source>
+                <target>Publier « %1$s » ?</target>
+            </trans-unit>
+            <trans-unit id="inbox.confirm.text" xml:space="preserve">
+                <source>It goes live right away and is visible on the website.</source>
+                <target>Le contenu est mis en ligne immédiatement.</target>
+            </trans-unit>
+            <trans-unit id="inbox.published" xml:space="preserve">
+                <source>"%1$s" is live.</source>
+                <target>« %1$s » est en ligne.</target>
+            </trans-unit>
+            <trans-unit id="inbox.error" xml:space="preserve">
+                <source>Could not publish.</source>
+                <target>La publication a échoué.</target>
+            </trans-unit>
+            <trans-unit id="inbox.previewError" xml:space="preserve">
+                <source>No preview available for this entry.</source>
+                <target>Aucun aperçu disponible.</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

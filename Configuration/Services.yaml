@@ -22,6 +22,9 @@ services:
   GbWeb\EditorialFlow\Controller\TaskAjaxController:
     public: true
 
+  GbWeb\EditorialFlow\Controller\ReviewInboxController:
+    public: true
+
   GbWeb\EditorialFlow\EventListener\PageModuleEventListener:
     public: true
 

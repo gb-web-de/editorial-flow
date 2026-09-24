@@ -900,6 +900,46 @@
                 <source>another workspace</source>
                 <target>einem anderen Workspace</target>
             </trans-unit>
+            <trans-unit id="inbox.title" xml:space="preserve">
+                <source>Approvals</source>
+                <target>Freigaben</target>
+            </trans-unit>
+            <trans-unit id="inbox.empty" xml:space="preserve">
+                <source>Nothing is waiting for you.</source>
+                <target>Nichts wartet auf dich.</target>
+            </trans-unit>
+            <trans-unit id="inbox.preview" xml:space="preserve">
+                <source>Preview</source>
+                <target>Vorschau</target>
+            </trans-unit>
+            <trans-unit id="inbox.publish" xml:space="preserve">
+                <source>Publish</source>
+                <target>Freigeben</target>
+            </trans-unit>
+            <trans-unit id="inbox.board" xml:space="preserve">
+                <source>Open board</source>
+                <target>Im Board öffnen</target>
+            </trans-unit>
+            <trans-unit id="inbox.confirm.title" xml:space="preserve">
+                <source>Publish "%1$s"?</source>
+                <target>"%1$s" freigeben?</target>
+            </trans-unit>
+            <trans-unit id="inbox.confirm.text" xml:space="preserve">
+                <source>It goes live right away and is visible on the website.</source>
+                <target>Der Beitrag geht sofort live und ist auf der Website sichtbar.</target>
+            </trans-unit>
+            <trans-unit id="inbox.published" xml:space="preserve">
+                <source>"%1$s" is live.</source>
+                <target>"%1$s" ist jetzt online.</target>
+            </trans-unit>
+            <trans-unit id="inbox.error" xml:space="preserve">
+                <source>Could not publish.</source>
+                <target>Freigabe fehlgeschlagen.</target>
+            </trans-unit>
+            <trans-unit id="inbox.previewError" xml:space="preserve">
+                <source>No preview available for this entry.</source>
+                <target>Für diesen Eintrag gibt es keine Vorschau.</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

@@ -764,6 +764,37 @@ final class TaskRepository
     }
 
     /**
+     * Open tasks that already have work in one of the given workspaces - the
+     * candidates for the review inbox (ReviewInbox). Newest first.
+     *
+     * @param list<int> $workspaceUids
+     * @return list<array<string, mixed>>
+     */
+    public function findOpenInWorkspaces(array $workspaceUids, int $limit = 100): array
+    {
+        $workspaceUids = array_values(array_filter($workspaceUids, static fn (int $uid): bool => $uid > 0));
+        if ($workspaceUids === []) {
+            return [];
+        }
+
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable(self::TABLE);
+        $queryBuilder->getRestrictions()->removeAll();
+
+        return $queryBuilder
+            ->select('*')
+            ->from(self::TABLE)
+            ->where(
+                $queryBuilder->expr()->in('workspace_uid', $queryBuilder->createNamedParameter($workspaceUids, Connection::PARAM_INT_ARRAY)),
+                $queryBuilder->expr()->eq('closed', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+            )
+            ->orderBy('tstamp', 'DESC')
+            ->setMaxResults(max(1, $limit))
+            ->executeQuery()
+            ->fetchAllAssociative();
+    }
+
+    /**
      * Open tasks assigned to one editor - the "my tasks" view.
      *
      * @return list<array<string, mixed>>

@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use GbWeb\EditorialFlow\Controller\ReviewInboxController;
 use GbWeb\EditorialFlow\Controller\TaskAjaxController;
 
 /**
@@ -174,5 +175,10 @@ return [
     'editorialflow_checklist_remove' => [
         'path' => '/editorialflow/checklist/remove',
         'target' => TaskAjaxController::class . '::checklistRemoveAction',
+    ],
+    // Top-bar Approvals item: re-render its dropdown after a change.
+    'editorialflow_review_inbox_render' => [
+        'path' => '/editorialflow/review-inbox/render',
+        'target' => ReviewInboxController::class . '::renderAction',
     ],
 ];

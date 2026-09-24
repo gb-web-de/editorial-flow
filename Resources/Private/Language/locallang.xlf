@@ -754,6 +754,36 @@
             <trans-unit id="column.foreign.otherWorkspace" xml:space="preserve">
                 <source>another workspace</source>
             </trans-unit>
+            <trans-unit id="inbox.title" xml:space="preserve">
+                <source>Approvals</source>
+            </trans-unit>
+            <trans-unit id="inbox.empty" xml:space="preserve">
+                <source>Nothing is waiting for you.</source>
+            </trans-unit>
+            <trans-unit id="inbox.preview" xml:space="preserve">
+                <source>Preview</source>
+            </trans-unit>
+            <trans-unit id="inbox.publish" xml:space="preserve">
+                <source>Publish</source>
+            </trans-unit>
+            <trans-unit id="inbox.board" xml:space="preserve">
+                <source>Open board</source>
+            </trans-unit>
+            <trans-unit id="inbox.confirm.title" xml:space="preserve">
+                <source>Publish "%1$s"?</source>
+            </trans-unit>
+            <trans-unit id="inbox.confirm.text" xml:space="preserve">
+                <source>It goes live right away and is visible on the website.</source>
+            </trans-unit>
+            <trans-unit id="inbox.published" xml:space="preserve">
+                <source>"%1$s" is live.</source>
+            </trans-unit>
+            <trans-unit id="inbox.error" xml:space="preserve">
+                <source>Could not publish.</source>
+            </trans-unit>
+            <trans-unit id="inbox.previewError" xml:space="preserve">
+                <source>No preview available for this entry.</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>
