@@ -59,9 +59,26 @@ final class TaskAutoCreationService
         int|string $id,
         DataHandler $dataHandler,
     ): void {
-        if ($status !== 'update') {
+        // A record CREATED inside a workspace is pending work exactly like an
+        // edited one - it has to be reviewed and published before anyone sees
+        // it. Ignoring 'new' was why a coach's brand-new blog post never showed
+        // up on the board at all: only later edits of existing records opened
+        // tasks. On 'new', $id is still the NEW... key of the datamap; the real
+        // uid is in substNEWwithIDs, which DataHandler fills before this runs.
+        // Core keeps a workspace-born record as a single row that is its own
+        // version, which resolveLiveAndVersion() already understands.
+        $isNewRecord = $status === 'new';
+        if ($isNewRecord) {
+            $id = (int)($dataHandler->substNEWwithIDs[$id] ?? 0);
+        } elseif ($status !== 'update') {
             return;
         }
+        // No follow-up question for a record that did not exist a moment ago:
+        // new content on a page belongs to that page's task, and a record
+        // created programmatically (an import, EXT:handball's match report)
+        // would otherwise leave a routing dialog waiting on the next backend
+        // page load for someone who never saw the record being made.
+        $askFollowUp = !$isNewRecord;
         $workspaceUid = (int)($dataHandler->BE_USER->workspace ?? 0);
         if ($workspaceUid < 1) {
             // Live edits do not open tasks: the workflow starts when work becomes
@@ -124,7 +141,7 @@ final class TaskAutoCreationService
                 } else {
                     // No-ops for anything that is not Review/Ready, so this is
                     // a call rather than a second copy of that condition.
-                    $this->maybeRegressPastEditing($activeTask, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler);
+                    $this->maybeRegressPastEditing($activeTask, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler, $askFollowUp);
                 }
             }
 
@@ -137,7 +154,7 @@ final class TaskAutoCreationService
             if ((int)($existing['workspace_uid'] ?? 0) === 0) {
                 $this->taskRepository->attachWorkspace((int)$existing['uid'], $workspaceUid, $stageUid);
             } else {
-                $this->maybeRegressPastEditing($existing, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler);
+                $this->maybeRegressPastEditing($existing, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler, $askFollowUp);
             }
             return;
         }
@@ -159,7 +176,7 @@ final class TaskAutoCreationService
                     ['table' => $table, 'recordUid' => $liveUid, 'stageUid' => $stageUid],
                 );
             } else {
-                $regressed = $this->maybeRegressPastEditing($pageTask, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler);
+                $regressed = $this->maybeRegressPastEditing($pageTask, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler, $askFollowUp);
             }
 
             // Claim it onto the page task NOW, not only once the editor answers
@@ -187,7 +204,7 @@ final class TaskAutoCreationService
             // (see maybeRegressPastEditing()) - the routing question below is a
             // refinement of where the edit lands, secondary to the fact that the
             // task's stage itself just silently moved.
-            if ($regressed) {
+            if ($regressed || !$askFollowUp) {
                 return;
             }
 
@@ -224,7 +241,7 @@ final class TaskAutoCreationService
             );
             $workStartedNow = true;
         } else {
-            $regressed = $this->maybeRegressPastEditing($task, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler);
+            $regressed = $this->maybeRegressPastEditing($task, $table, $liveUid, $workspaceUid, $beUserId, $dataHandler, $askFollowUp);
         }
 
         if ($resolvedTask['createdNow'] && !$workStartedNow) {
@@ -241,7 +258,7 @@ final class TaskAutoCreationService
             return;
         }
 
-        if ($resolvedTask['createdNow']) {
+        if ($resolvedTask['createdNow'] && $askFollowUp) {
             $this->storePendingWizard($dataHandler, [
                 'mode' => 'configure_auto_task',
                 'taskUid' => $taskUid,
@@ -518,6 +535,7 @@ final class TaskAutoCreationService
         int $workspaceUid,
         int $beUserId,
         DataHandler $dataHandler,
+        bool $askFollowUp = true,
     ): bool {
         $state = TaskState::tryFrom((string)$task['state']);
         if ($state !== TaskState::REVIEW && $state !== TaskState::READY) {
@@ -551,6 +569,9 @@ final class TaskAutoCreationService
         $lastComment = end($comments);
         $commentUid = $lastComment !== false ? (int)$lastComment['uid'] : 0;
 
+        if (!$askFollowUp) {
+            return true;
+        }
         $this->storePendingWizard($dataHandler, [
             'mode' => 'regression_comment',
             'taskUid' => $taskUid,
