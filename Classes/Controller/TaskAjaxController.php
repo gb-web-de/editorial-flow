@@ -23,6 +23,8 @@ use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
+use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
+use GbWeb\EditorialFlow\Service\WorkspaceAccessDenied;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
 use GbWeb\EditorialFlow\Service\WorkspaceIntegrationService;
 use Psr\Http\Message\ResponseInterface;
@@ -70,6 +72,7 @@ final class TaskAjaxController
         private readonly ViewFactoryInterface $viewFactory,
         private readonly LoggerInterface $logger,
         private readonly WorkspaceConflictDetector $conflictDetector,
+        private readonly TaskWorkspaceScope $workspaceScope,
     ) {
     }
 
@@ -495,7 +498,6 @@ final class TaskAjaxController
         }
 
         $workspaceUid = (int)$task['workspace_uid'];
-        $currentWorkspace = (int)$this->getBackendUser()->workspace;
         $workspaceTitles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
         $workspaceTitle = $workspaceUid > 0 ? ($workspaceTitles[$workspaceUid] ?? ('#' . $workspaceUid)) : '';
 
@@ -527,11 +529,14 @@ final class TaskAjaxController
         // Answered here rather than left for the POST to refuse, so the dialog
         // can grey the option out and say why instead of letting an editor pick
         // something that is going to fail.
-        $canDiscard = $pending !== [] && $workspaceUid > 0 && $currentWorkspace === $workspaceUid;
+        //
+        // The discard runs in the task's own workspace (TaskWorkspaceScope),
+        // so the only thing that can block it here is not being a member.
+        $canDiscard = $pending !== [] && $this->workspaceScope->canEnter($this->getBackendUser(), $workspaceUid);
         $discardBlockedReason = '';
         if ($pending !== [] && !$canDiscard) {
             $discardBlockedReason = sprintf(
-                'Switch to workspace "%s" to discard these changes.',
+                'You are not a member of workspace "%s", so you cannot discard these changes.',
                 $workspaceTitle !== '' ? $workspaceTitle : ('#' . $workspaceUid),
             );
         }
@@ -596,13 +601,12 @@ final class TaskAjaxController
         $table = (string)($body['table'] ?? '');
         $uid = (int)($body['uid'] ?? 0);
 
-        $error = $this->assertMayEdit($table, $uid);
-        if ($error !== null) {
-            return $this->error($error);
-        }
-
         $task = $this->taskRepository->findOpenTaskByMember($table, $uid);
         if ($task === null) {
+            $error = $this->assertMayEdit($table, $uid);
+            if ($error !== null) {
+                return $this->error($error);
+            }
             return $this->reject(
                 'record-not-in-open-task',
                 'This record does not belong to an open task.',
@@ -619,7 +623,21 @@ final class TaskAjaxController
             : false;
         $versionUid = $versionRecord !== false ? (int)$versionRecord['uid'] : $uid;
 
-        $url = GeneralUtility::makeInstance(PreviewUriBuilder::class)->buildUriForElement($table, $versionUid);
+        // Built in the task's workspace: the preview link carries the
+        // workspace it previews, and asked from Live - where a coach who never
+        // switched sits - it would show them the page as it is, not the draft
+        // they are about to approve.
+        $build = function () use ($table, $uid, $versionUid): TaskActionError|string {
+            return $this->assertMayEdit($table, $uid)
+                ?? GeneralUtility::makeInstance(PreviewUriBuilder::class)->buildUriForElement($table, $versionUid);
+        };
+        $url = $workspaceUid > 0 ? $this->inTaskWorkspace($task, $build) : $build();
+        if ($url instanceof ResponseInterface) {
+            return $url;
+        }
+        if ($url instanceof TaskActionError) {
+            return $this->error($url);
+        }
         if ($url === '') {
             return $this->reject(
                 'preview-unavailable',
@@ -644,13 +662,12 @@ final class TaskAjaxController
         $table = (string)($body['table'] ?? '');
         $uid = (int)($body['uid'] ?? 0);
 
-        $error = $this->assertMayEdit($table, $uid);
-        if ($error !== null) {
-            return $this->error($error);
-        }
-
         $task = $this->taskRepository->findOpenTaskByMember($table, $uid);
         if ($task === null) {
+            $error = $this->assertMayEdit($table, $uid);
+            if ($error !== null) {
+                return $this->error($error);
+            }
             return $this->reject(
                 'record-not-in-open-task',
                 'This record does not belong to an open task.',
@@ -671,27 +688,25 @@ final class TaskAjaxController
         // workspace, and returns without a word - and without an errorLog entry -
         // when that workspace is Live (DataHandler.php:6158-6165). Called from
         // Live this reported a successful discard having thrown away nothing.
-        $currentWorkspace = (int)$this->getBackendUser()->workspace;
-        if ($currentWorkspace !== $workspaceUid) {
-            $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
-            return $this->reject(
-                'discard-requires-task-workspace',
-                sprintf(
-                    'Switch to workspace "%s" to discard this record\'s changes.',
-                    $titles[$workspaceUid] ?? ('#' . $workspaceUid),
-                ),
-                [
-                    'table' => $table,
-                    'uid' => $uid,
-                    'workspaceUid' => $workspaceUid,
-                    'currentWorkspace' => $currentWorkspace,
-                ],
-            );
-        }
+        // It used to be refused with "switch first"; it now simply runs in the
+        // task's workspace, which is the one discard() has to see.
+        $dataHandler = $this->inTaskWorkspace($task, function () use ($table, $uid): TaskActionError|DataHandler {
+            $error = $this->assertMayEdit($table, $uid);
+            if ($error !== null) {
+                return $error;
+            }
+            $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+            $dataHandler->start([], [$table => [$uid => ['discard' => true]]]);
+            $dataHandler->process_cmdmap();
 
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start([], [$table => [$uid => ['discard' => true]]]);
-        $dataHandler->process_cmdmap();
+            return $dataHandler;
+        });
+        if ($dataHandler instanceof ResponseInterface) {
+            return $dataHandler;
+        }
+        if ($dataHandler instanceof TaskActionError) {
+            return $this->error($dataHandler);
+        }
 
         if ($dataHandler->errorLog !== []) {
             $this->logger->warning('core-refused-discard', [
@@ -1096,14 +1111,23 @@ final class TaskAjaxController
             ]);
         }
 
-        $error = $this->assertMayEdit($table, $uid);
-        if ($error !== null) {
-            return $this->error($error);
-        }
-
         $task = $this->findOpenTaskOrError($taskUid, 'make it the active task');
         if ($task instanceof ResponseInterface) {
             return $task;
+        }
+
+        // Working ON a task means editing its records, and editing - unlike
+        // moving or publishing, which TaskWorkspaceScope handles in place -
+        // really does happen in the user's current workspace: that is where
+        // the page module, the form engine and the preview all look. So this
+        // is the one action that switches, and it switches for the user
+        // instead of refusing with "switch first". Only into a workspace the
+        // user belongs to; setWorkspace() checks that itself as well.
+        $workspaceSwitched = $this->enterTaskWorkspace($task);
+
+        $error = $this->assertMayEdit($table, $uid);
+        if ($error !== null) {
+            return $this->error($error);
         }
 
         $allowedTaskUids = array_map(
@@ -1196,7 +1220,28 @@ final class TaskAjaxController
             'comment' => $comment,
             'commentUid' => $commentUid,
             'activeTask' => $this->activeTaskPayload($task, $table, $uid),
+            'workspaceSwitched' => $workspaceSwitched,
         ]);
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     * @return bool whether the user's workspace was changed
+     */
+    private function enterTaskWorkspace(array $task): bool
+    {
+        $backendUser = $this->getBackendUser();
+        $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);
+        if ($taskWorkspaceUid < 1
+            || $taskWorkspaceUid === (int)$backendUser->workspace
+            || !$this->workspaceScope->canEnter($backendUser, $taskWorkspaceUid)
+        ) {
+            return false;
+        }
+
+        $backendUser->setWorkspace($taskWorkspaceUid);
+
+        return (int)$backendUser->workspace === $taskWorkspaceUid;
     }
 
     /**
@@ -1451,7 +1496,7 @@ final class TaskAjaxController
             ]);
         }
 
-        $refusal = $this->stageTransitionService->transition(
+        $refusal = $this->inTaskWorkspace($task, fn (): ?string => $this->stageTransitionService->transition(
             $task,
             $versionsByTable,
             $targetStageUid,
@@ -1459,7 +1504,10 @@ final class TaskAjaxController
             $comment,
             $recipients,
             $criteria === [] ? null : $this->buildAcceptanceRecord($criteria, $stageTitle),
-        );
+        ));
+        if ($refusal instanceof ResponseInterface) {
+            return $refusal;
+        }
         if ($refusal !== null) {
             // Core refused. Our own state must not drift away from what core did,
             // so nothing is written on this path. Logged at warning, not notice -
@@ -1558,6 +1606,18 @@ final class TaskAjaxController
 
         $versionsByTable = $this->memberSynchronizer->findPendingVersionsByTable($taskUid, $workspaceUid);
 
+        // The dialog itself, for the TASK's workspace - see
+        // WorkspaceIntegrationService::buildStageDialog() for why core's own
+        // endpoint cannot be asked for it. Built in that workspace because the
+        // stage list core hands out depends on it.
+        $targetStageUid = isset($body['stageUid']) ? (int)$body['stageUid'] : null;
+        $dialog = $targetStageUid === null
+            ? null
+            : $this->inTaskWorkspace($task, fn (): ?array => $this->workspaceService->buildStageDialog($workspaceUid, $targetStageUid));
+        if ($dialog instanceof ResponseInterface) {
+            return $dialog;
+        }
+
         return new JsonResponse([
             'success' => true,
             'hasPending' => $versionsByTable !== [],
@@ -1566,6 +1626,7 @@ final class TaskAjaxController
                 $workspaceUid,
                 (int)$task['stage_uid'],
             ),
+            'dialog' => $dialog,
         ]);
     }
 
@@ -1628,7 +1689,12 @@ final class TaskAjaxController
             return $this->resolveEmptyPublish($taskUid, $workspaceUid);
         }
 
-        $refusal = $this->askCoreToPublish($pairsByTable);
+        // Everything from here on is core's to decide, in the task's own
+        // workspace - wherever the user's workspace selector happens to point.
+        $refusal = $this->inTaskWorkspace($task, fn (): ?string => $this->walkToPublishStageAndPublish($task, $pairsByTable));
+        if ($refusal instanceof ResponseInterface) {
+            return $refusal;
+        }
         if ($refusal !== null) {
             $this->logger->warning('core-refused-publish', [
                 'taskUid' => $taskUid,
@@ -1652,6 +1718,69 @@ final class TaskAjaxController
             'success' => true,
             'closed' => $reloaded === null || (bool)$reloaded['closed'],
         ]);
+    }
+
+    /**
+     * One click from wherever the task sits to live.
+     *
+     * With the workspace's PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE bit set, core
+     * publishes only from "Ready to publish". A user TaskPublishGate lets
+     * through from an earlier stage is one core itself would let walk the task
+     * there (see TaskPublishGate::isGranted()), so the walk is done here, as a
+     * real, recorded stage change, instead of making them drag the card first
+     * and press Publish second. The trail shows both steps, exactly as if they
+     * had been done by hand.
+     *
+     * @param array<string, mixed> $task
+     * @param array<string, list<array{live: int, version: int}>> $pairsByTable
+     * @return string|null the refusal reason, or null when core accepted
+     */
+    private function walkToPublishStageAndPublish(array $task, array $pairsByTable): ?string
+    {
+        if ($this->taskPublishGate->needsWalkToPublishStage($this->getBackendUser(), (int)$task['workspace_uid'], (int)$task['stage_uid'])) {
+            $versionsByTable = array_map(
+                static fn (array $pairs): array => array_map(static fn (array $pair): int => $pair['version'], $pairs),
+                $pairsByTable,
+            );
+            $refusal = $this->stageTransitionService->transition(
+                $task,
+                $versionsByTable,
+                StagesService::STAGE_PUBLISH_ID,
+                (int)($this->getBackendUser()->user['uid'] ?? 0),
+            );
+            if ($refusal !== null) {
+                return $refusal;
+            }
+        }
+
+        return $this->askCoreToPublish($pairsByTable);
+    }
+
+    /**
+     * Runs $work inside the task's own workspace (TaskWorkspaceScope), or
+     * answers with a refusal when the user is no member of it.
+     *
+     * @template T
+     * @param array<string, mixed> $task
+     * @param callable(): T $work
+     * @return T|ResponseInterface
+     */
+    private function inTaskWorkspace(array $task, callable $work): mixed
+    {
+        $workspaceUid = (int)($task['workspace_uid'] ?? 0);
+        try {
+            return $this->workspaceScope->run($this->getBackendUser(), $workspaceUid, $work);
+        } catch (WorkspaceAccessDenied) {
+            $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
+            return $this->reject(
+                'no-workspace-access',
+                sprintf(
+                    'This task belongs to workspace "%s", and you are not a member of it.',
+                    $titles[$workspaceUid] ?? ('#' . $workspaceUid),
+                ),
+                ['taskUid' => (int)($task['uid'] ?? 0), 'workspaceUid' => $workspaceUid],
+            );
+        }
     }
 
     /**
@@ -1858,18 +1987,23 @@ final class TaskAjaxController
      */
     private function discardPendingVersions(int $taskUid, int $workspaceUid, array $pending): ResponseInterface|array
     {
-        $currentWorkspace = (int)$this->getBackendUser()->workspace;
-        if ($workspaceUid < 1 || $currentWorkspace !== $workspaceUid) {
-            $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
-            return $this->reject(
-                'close-requires-task-workspace',
-                sprintf(
-                    'Switch to workspace "%s" to discard these changes, or close the task and leave them pending.',
-                    $titles[$workspaceUid] ?? ('#' . $workspaceUid),
-                ),
-                ['taskUid' => $taskUid, 'workspaceUid' => $workspaceUid, 'currentWorkspace' => $currentWorkspace],
-            );
-        }
+        // Run in the task's own workspace rather than refused from anywhere
+        // else: discard() resolves versions through the acting user's
+        // workspace (see discardMemberAction()), so this is the one place it
+        // can work at all. Not being a member still refuses, and destroys
+        // nothing.
+        return $this->inTaskWorkspace(
+            ['uid' => $taskUid, 'workspace_uid' => $workspaceUid],
+            fn (): ResponseInterface|array => $this->discardPendingVersionsHere($taskUid, $workspaceUid, $pending),
+        );
+    }
+
+    /**
+     * @param array<string, list<array{live: int, version: int}>> $pending
+     * @return ResponseInterface|list<array{table: string, uid: int, title: string}>
+     */
+    private function discardPendingVersionsHere(int $taskUid, int $workspaceUid, array $pending): ResponseInterface|array
+    {
 
         $refused = [];
         foreach ($pending as $table => $pairs) {

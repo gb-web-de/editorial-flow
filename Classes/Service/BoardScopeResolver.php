@@ -11,6 +11,7 @@ use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Type\Bitmask\Permission;
 use TYPO3\CMS\Core\Utility\GeneralUtility;
+use TYPO3\CMS\Core\Versioning\VersionState;
 
 /**
  * Turns "this page, at this depth" (or "this workspace's own root pages") into the
@@ -35,9 +36,12 @@ final class BoardScopeResolver
     }
 
     /**
+     * @param list<int> $workspaceUids workspaces whose NEW pages count as part of
+     *        the tree - see addWorkspaceBornPages(). Only ever workspaces the
+     *        user may access; the caller already knows which those are.
      * @return list<int>
      */
-    public function resolvePageUids(int $pageUid, int $depth, BackendUserAuthentication $backendUser): array
+    public function resolvePageUids(int $pageUid, int $depth, BackendUserAuthentication $backendUser, array $workspaceUids = []): array
     {
         if ($pageUid < 1) {
             return [];
@@ -49,8 +53,30 @@ final class BoardScopeResolver
         $repository = GeneralUtility::makeInstance(PageTreeRepository::class);
         $pages = $repository->getFlattenedPages([$pageUid], $depth);
         $pageUids = array_values(array_unique(array_map(static fn (array $page): int => (int)$page['uid'], $pages)));
+        $pageUids = $this->addWorkspaceBornPages($pageUids, $workspaceUids);
 
         return $this->filterByAccess($pageUids, $backendUser);
+    }
+
+    /**
+     * The root scope of several workspaces at once: everything below the mount
+     * points of each of them, including the pages created inside them.
+     *
+     * This is what lets one board show a coach every team they look after. It
+     * used to be the active workspace's roots only, so a coach owning three
+     * team workspaces saw one team's work and had to switch to find the rest.
+     *
+     * @param list<int> $workspaceUids
+     * @return list<int>
+     */
+    public function resolveRootPageUidsForWorkspaces(array $workspaceUids, BackendUserAuthentication $backendUser): array
+    {
+        $pageUids = [];
+        foreach ($workspaceUids as $workspaceUid) {
+            $pageUids = array_merge($pageUids, $this->resolveWorkspaceRootPageUids($workspaceUid, $backendUser));
+        }
+
+        return array_values(array_unique($pageUids));
     }
 
     /**
@@ -66,14 +92,14 @@ final class BoardScopeResolver
         if ($mountpoints === []) {
             // No db_mountpoints configured (the common case) - fall back to the
             // installation's actual root pages instead of surfacing nothing.
-            return $this->resolveFallbackRootPageUids($backendUser);
+            return $this->resolveFallbackRootPageUids($backendUser, $workspaceUid);
         }
 
         $pageUids = [];
         foreach ($mountpoints as $mountpoint) {
             // 999 = the whole subtree below each mount point, matching this class's
             // own "root" depth convention.
-            $pageUids = array_merge($pageUids, $this->resolvePageUids($mountpoint, 999, $backendUser));
+            $pageUids = array_merge($pageUids, $this->resolvePageUids($mountpoint, 999, $backendUser, [$workspaceUid]));
         }
 
         return array_values(array_unique($pageUids));
@@ -82,7 +108,7 @@ final class BoardScopeResolver
     /**
      * @return list<int>
      */
-    private function resolveFallbackRootPageUids(BackendUserAuthentication $backendUser): array
+    private function resolveFallbackRootPageUids(BackendUserAuthentication $backendUser, int $workspaceUid): array
     {
         $pageUids = $this->queryRootCandidates('pid');
         if ($pageUids === []) {
@@ -91,7 +117,7 @@ final class BoardScopeResolver
 
         $subtreeUids = [];
         foreach ($pageUids as $pageUid) {
-            $subtreeUids = array_merge($subtreeUids, $this->resolvePageUids($pageUid, 999, $backendUser));
+            $subtreeUids = array_merge($subtreeUids, $this->resolvePageUids($pageUid, 999, $backendUser, [$workspaceUid]));
         }
 
         return array_values(array_unique($subtreeUids));
@@ -120,6 +146,61 @@ final class BoardScopeResolver
             ->fetchAllAssociative();
 
         return array_values(array_unique(array_map(static fn (array $row): int => (int)$row['uid'], $rows)));
+    }
+
+    /**
+     * Adds the pages that exist only inside one of $workspaceUids below the
+     * given (live) pages, level by level.
+     *
+     * PageTreeRepository is asked in live context on purpose: in a workspace
+     * it answers with VERSION uids for changed pages, and tasks are keyed by
+     * live uids, so every edited page would drop off the board. A page created
+     * in a workspace has no live uid to lose - it is one row with t3ver_state 1
+     * and its own uid - so it is added here instead. Without this, a new blog
+     * post had a task but no board would ever show it: its subject_pid was not
+     * in any page list the board queried.
+     *
+     * @param list<int> $pageUids
+     * @param list<int> $workspaceUids
+     * @return list<int>
+     */
+    private function addWorkspaceBornPages(array $pageUids, array $workspaceUids): array
+    {
+        $workspaceUids = array_values(array_filter($workspaceUids, static fn (int $uid): bool => $uid > 0));
+        if ($workspaceUids === [] || $pageUids === []) {
+            return $pageUids;
+        }
+
+        $known = array_fill_keys($pageUids, true);
+        $parents = $pageUids;
+        // Bounded like the tree walk it extends; a new page nested ten levels
+        // deep inside other new pages is not a board scenario.
+        for ($level = 0; $level < 10 && $parents !== []; $level++) {
+            $queryBuilder = $this->connectionPool->getQueryBuilderForTable('pages');
+            $queryBuilder->getRestrictions()->removeAll();
+            $children = $queryBuilder
+                ->select('uid')
+                ->from('pages')
+                ->where(
+                    $queryBuilder->expr()->in('pid', $queryBuilder->createNamedParameter($parents, Connection::PARAM_INT_ARRAY)),
+                    $queryBuilder->expr()->in('t3ver_wsid', $queryBuilder->createNamedParameter($workspaceUids, Connection::PARAM_INT_ARRAY)),
+                    $queryBuilder->expr()->eq('t3ver_state', $queryBuilder->createNamedParameter(VersionState::NEW_PLACEHOLDER->value, Connection::PARAM_INT)),
+                    $queryBuilder->expr()->eq('deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                )
+                ->executeQuery()
+                ->fetchFirstColumn();
+
+            $parents = [];
+            foreach ($children as $child) {
+                $child = (int)$child;
+                if (!isset($known[$child])) {
+                    $known[$child] = true;
+                    $parents[] = $child;
+                }
+            }
+        }
+
+        return array_keys($known);
     }
 
     /**

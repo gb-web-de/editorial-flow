@@ -178,7 +178,11 @@ final class PendingRecordTicketMovesTest extends FunctionalTestCase
         $recordUid = $this->createCategoryThroughDataHandler(2, 'Unrelated');
         $task = $this->get(TaskRepository::class)->findByUid($taskUid);
         self::assertSame(0, (int)$task['subject_uid']);
-        self::assertNull($this->get(TaskRepository::class)->findOpenTaskByMember(self::RECORD_TABLE, $recordUid));
+        // Not claimed by the cancelled ticket. It is not taskless either: a
+        // record created inside a workspace opens its own task like any other
+        // pending change (see NewRecordInWorkspaceTest).
+        $owner = $this->get(TaskRepository::class)->findOpenTaskByMember(self::RECORD_TABLE, $recordUid);
+        self::assertNotSame($taskUid, (int)($owner['uid'] ?? 0));
     }
 
     #[Test]

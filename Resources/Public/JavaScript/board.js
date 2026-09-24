@@ -39,12 +39,9 @@ import { registerCloseActions, openCloseDialog } from '@gb-web/editorial-flow/ta
 import { notifyRefusal } from '@gb-web/editorial-flow/task/refusal.js';
 import { registerChecklistManagement, registerChecklistManageActions, registerChecklistToggle } from '@gb-web/editorial-flow/board/checklist.js';
 import { appendAcceptanceCriteria, confirmIncompleteCriteria } from '@gb-web/editorial-flow/board/criteria.js';
-
-/*
- * Core's own "Editing" stage (StagesService::STAGE_EDIT_ID), the one a record
- * sits in as soon as a workspace version exists.
- */
-const EDITING_STAGE_UID = 0;
+// EDITING_STAGE_UID: core's own "Editing" stage (StagesService::STAGE_EDIT_ID),
+// the one a record sits in as soon as a workspace version exists.
+import { EDITING_STAGE_UID, isStageColumn, columnStageFor } from '@gb-web/editorial-flow/board/stage-map.js';
 
 /*
  * A ticket planned with "Neue Seite erstellen" carries no subject yet, which
@@ -180,15 +177,17 @@ class EditorialFlowBoard {
     const currentStage = this.parseStageUid(card.dataset.editorialflowStage);
     const currentWorkspaceUid = parseInt(card.dataset.editorialflowWorkspace || '0', 10);
     const targetState = column.dataset.editorialflowState || '';
-    const targetStage = this.parseStageUid(column.dataset.editorialflowStage);
+    const targetStage = this.columnStageFor(card, column);
 
-    if (targetStage !== null) {
+    if (this.isStageColumn(column)) {
       if (currentWorkspaceUid < 1) {
         // Editing is where any planned task starts. Pending subjects open core's
         // creation wizard; existing subjects become the active edit context.
         return targetStage === EDITING_STAGE_UID;
       }
-      return currentStage !== targetStage;
+      // null: a step the card's own workspace does not have. Not a refusal of
+      // the user - the card simply cannot be in a stage its workspace lacks.
+      return targetStage !== null && currentStage !== targetStage;
     }
 
     if (currentWorkspaceUid > 0) {
@@ -214,15 +213,19 @@ class EditorialFlowBoard {
     const currentState = card.dataset.editorialflowState || '';
     const currentWorkspaceUid = parseInt(card.dataset.editorialflowWorkspace || '0', 10);
     const targetState = column.dataset.editorialflowState || '';
-    const targetStage = this.parseStageUid(column.dataset.editorialflowStage);
+    const isStageColumn = this.isStageColumn(column);
+    const targetStage = this.columnStageFor(card, column);
 
-    if (targetStage !== null && currentWorkspaceUid < 1) {
+    if (isStageColumn && currentWorkspaceUid < 1) {
       return 'This planned task has to enter Editing before it can move to a review stage.';
     }
-    if (targetStage === null && currentWorkspaceUid > 0) {
+    if (isStageColumn && targetStage === null) {
+      return 'This step is not part of the workflow of this task\'s workspace.';
+    }
+    if (!isStageColumn && currentWorkspaceUid > 0) {
       return 'This task already has a workspace version, so it cannot be moved back to a planning column.';
     }
-    if (targetStage === null && currentState === targetState) {
+    if (!isStageColumn && currentState === targetState) {
       return 'This task is already in that column.';
     }
     if (targetStage !== null && this.parseStageUid(card.dataset.editorialflowStage) === targetStage) {
@@ -234,7 +237,7 @@ class EditorialFlowBoard {
 
   async handleCardDrop(taskUid, column, card = null) {
     const targetState = column.dataset.editorialflowState || 'backlog';
-    const targetStageUid = this.parseStageUid(column.dataset.editorialflowStage);
+    const targetStageUid = this.isStageColumn(column) ? this.columnStageFor(card, column) : null;
     const columnTitle = column.querySelector('.editorialflow-column-title')?.textContent?.trim() || targetState;
     const cardTitle = card?.dataset.editorialflowTitle || 'Task';
 
@@ -256,7 +259,7 @@ class EditorialFlowBoard {
       // matches every other drop rule in getDropRejectionMessage() instead of
       // opening a dialog that cannot succeed. The same round trip brings back
       // the acceptance criteria the dialog has to ask about.
-      const eligibility = await this.checkStageTransition(taskUid);
+      const eligibility = await this.checkStageTransition(taskUid, targetStageUid);
       if (eligibility.hasPending === false) {
         const message = `${cardTitle} has nothing pending in this workspace yet, so it cannot be sent to a review stage.`;
         Notification.warning('Editorial Flow', message);
@@ -271,6 +274,7 @@ class EditorialFlowBoard {
         cardTitle,
         card?.dataset.editorialflowActive === 'true' && targetStageUid !== EDITING_STAGE_UID,
         eligibility.criteria,
+        eligibility.dialog,
       );
       return;
     }
@@ -289,20 +293,21 @@ class EditorialFlowBoard {
    * here. The criteria are asked for again server-side at submit time, so
    * losing them here weakens the prompt, never the rule.
    */
-  async checkStageTransition(taskUid) {
-    const unknown = { hasPending: true, criteria: [] };
+  async checkStageTransition(taskUid, stageUid = null) {
+    const unknown = { hasPending: true, criteria: [], dialog: null };
     const url = TYPO3.settings.ajaxUrls.editorialflow_task_check_stage_transition;
     if (!url) {
       return unknown;
     }
     try {
-      const result = await this.postJson(url, { task: taskUid });
+      const result = await this.postJson(url, stageUid === null ? { task: taskUid } : { task: taskUid, stageUid });
       if (result.success !== true) {
         return unknown;
       }
       return {
         hasPending: result.hasPending !== false,
         criteria: Array.isArray(result.criteria) ? result.criteria : [],
+        dialog: result.dialog && typeof result.dialog === 'object' ? result.dialog : null,
       };
     } catch {
       return unknown;
@@ -494,15 +499,21 @@ class EditorialFlowBoard {
     }
   }
 
-  async openStageTransitionModal(taskUid, targetStageUid, columnTitle, cardTitle, askToDeactivate = false, criteria = []) {
+  async openStageTransitionModal(taskUid, targetStageUid, columnTitle, cardTitle, askToDeactivate = false, criteria = [], dialog = null) {
     try {
-      const response = await this.workspaceUi.sendRemoteRequest(
-        this.workspaceUi.generateRemotePayloadBody('sendToSpecificStageWindow', [targetStageUid]),
-        '.editorialflow-board',
-      );
-      const payload = await response.resolve();
-
-      const stageDialogData = payload?.[0]?.result;
+      // The server builds the dialog for the TASK's workspace
+      // (checkStageTransitionEligibilityAction). Core's own endpoint is only
+      // the fallback: it answers for the user's current workspace, which is
+      // the wrong one for any card from another workspace.
+      let stageDialogData = dialog;
+      if (stageDialogData === null) {
+        const response = await this.workspaceUi.sendRemoteRequest(
+          this.workspaceUi.generateRemotePayloadBody('sendToSpecificStageWindow', [targetStageUid]),
+          '.editorialflow-board',
+        );
+        const payload = await response.resolve();
+        stageDialogData = payload?.[0]?.result;
+      }
       if (!stageDialogData || stageDialogData.success === false) {
         Notification.error('Editorial Flow', 'TYPO3 refused to open the workspace stage dialog.');
         return;
@@ -858,6 +869,14 @@ class EditorialFlowBoard {
     appendAcceptanceCriteria(form, criteria, taskUid);
 
     return wrapper;
+  }
+
+  isStageColumn(column) {
+    return isStageColumn(column);
+  }
+
+  columnStageFor(card, column) {
+    return columnStageFor(card, column);
   }
 
   parseStageUid(rawValue) {

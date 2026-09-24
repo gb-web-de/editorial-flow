@@ -248,7 +248,7 @@ final class BoardColumnRegistry
             // nothing about why; the names underneath say which workspaces are
             // involved but not what that means for the card being dragged.
             'foreignHint' => $ownStageUid !== null ? '' : sprintf(
-                $this->translate('column.foreign.hint') ?: 'This step belongs to %1$s. Switch into that workspace to move a task through it.',
+                $this->translate('column.foreign.hint') ?: 'This step belongs to %1$s.',
                 $contributingWorkspaceTitles === []
                     ? ($this->translate('column.foreign.otherWorkspace') ?: 'another workspace')
                     : implode(', ', $contributingWorkspaceTitles),
@@ -260,10 +260,16 @@ final class BoardColumnRegistry
             // own workspace's entry here, not against the scalar stageUid above
             // (which only ever names the active workspace's stage).
             'stageUidByWorkspace' => $group['stageUidByWorkspace'],
-            // Dropping here triggers a core stage transition for the active
-            // workspace's own tasks, never a direct write - and never at all when
-            // the active workspace has no stage of its own in this merged column.
-            'acceptsDrop' => $ownStageUid !== null,
+            // The same map for board.js. A card moves within ITS OWN workspace's
+            // chain (TaskWorkspaceScope runs the transition there), so the drop
+            // target is looked up by the card's workspace rather than read off
+            // the scalar stageUid - which only ever fit the active workspace,
+            // and made every other workspace's card undroppable.
+            'stageMapJson' => json_encode((object)$group['stageUidByWorkspace'], JSON_THROW_ON_ERROR),
+            // Dropping here triggers a core stage transition in the card's own
+            // workspace, never a direct write. Whether THIS card may land here
+            // is decided per card by board.js from stageMapJson.
+            'acceptsDrop' => true,
             // Configuring a stage's checklist is workspace policy, not
             // editorial work - restricted to whoever owns the workspace
             // (or admin), same as publishing. Never available on a column that
@@ -374,6 +380,7 @@ final class BoardColumnRegistry
             'state' => $state->value,
             'stageUid' => null,
             'stageUidByWorkspace' => null,
+            'stageMapJson' => '{}',
             'acceptsDrop' => $acceptsDrop,
             'colorMode' => 'none',
             'colorShared' => false,

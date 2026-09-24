@@ -156,7 +156,12 @@ class ActiveTaskControl {
         detail: { activeTask: result.activeTask || null },
       }));
 
-      if (source.dataset.editorialflowReload === 'true') {
+      if (result.workspaceSwitched === true) {
+        // The task lives in another workspace and the server just switched the
+        // user into it. The whole backend has to follow - header indicator,
+        // page tree, every open module - not just this frame.
+        (window.top || window).location.reload();
+      } else if (source.dataset.editorialflowReload === 'true') {
         window.location.reload();
       } else {
         await this.reloadControls();

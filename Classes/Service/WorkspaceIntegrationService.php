@@ -431,6 +431,55 @@ final class WorkspaceIntegrationService
     }
 
     /**
+     * The "send to stage" dialog's data for a stage of ANY workspace - the same
+     * shape core's WorkspacesAjaxController::getSentToStageWindow() answers.
+     *
+     * Core only ever builds it for the user's current workspace (its
+     * sendToSpecificStageWindow() looks the stage up there), so a card from
+     * another workspace opened a dialog with the wrong recipients, or none.
+     * Rebuilt here from the same public pieces core uses, so the board can ask
+     * for the task's own workspace. Null when that workspace has no such stage.
+     *
+     * @return array{sendMailTo?: list<array<string, mixed>>, additional?: array<string, string>, comments: array<string, string>}|null
+     */
+    public function buildStageDialog(int $workspaceUid, int $stageUid): ?array
+    {
+        try {
+            $stage = $this->stagesService->getStage(
+                $this->workspaceStageRepository->findAllStagesByWorkspace(
+                    $this->getBackendUser(),
+                    $this->workspaceRepository->findByUid($workspaceUid),
+                ),
+                $stageUid,
+            );
+        } catch (\RuntimeException|WorkspaceStageNotFoundException) {
+            return null;
+        }
+
+        $dialog = [];
+        if ($stage->isDialogEnabled) {
+            $dialog['sendMailTo'] = [];
+            foreach ($this->stagesService->getResponsibleBeUser($stage) as $backendUserId => $backendUser) {
+                if (empty($backendUser['email']) || !GeneralUtility::validEmail($backendUser['email'])) {
+                    continue;
+                }
+                $checked = in_array($backendUserId, $stage->preselectedRecipients);
+                $dialog['sendMailTo'][] = [
+                    'label' => sprintf('%s (%s)', ($backendUser['realName'] ?? '') ?: $backendUser['username'], $backendUser['email']),
+                    'value' => $backendUserId,
+                    'name' => 'recipients-' . $backendUserId,
+                    'checked' => $checked,
+                    'disabled' => $checked && !$stage->isPreselectionChangeable,
+                ];
+            }
+            $dialog['additional'] = ['type' => 'textarea', 'value' => ''];
+        }
+        $dialog['comments'] = ['type' => 'textarea', 'value' => $stage->defaultComment];
+
+        return $dialog;
+    }
+
+    /**
      * Turn the workspace dialog payload into the recipient array core expects.
      *
      * TYPO3's send-to-stage dialog submits backend user ids plus free-text email

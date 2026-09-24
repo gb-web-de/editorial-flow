@@ -64,6 +64,26 @@ final class TaskCloseActionTest extends FunctionalTestCase
         $GLOBALS['LANG'] = $this->get(LanguageServiceFactory::class)->createFromUserPreferences($GLOBALS['BE_USER']);
     }
 
+    /**
+     * The editor fixture, able to see and edit the pages - so that the ONLY
+     * thing standing between them and the task is not being a member of its
+     * workspace.
+     */
+    private function givenANonMemberWithPageAccess(): void
+    {
+        $this->getConnectionPool()->getConnectionForTable('be_groups')->insert('be_groups', [
+            'uid' => 50,
+            'title' => 'Editors',
+            'db_mountpoints' => '1',
+            'tables_modify' => 'pages,tt_content',
+            'tables_select' => 'pages,tt_content',
+        ]);
+        $this->getConnectionPool()->getConnectionForTable('be_users')
+            ->update('be_users', ['usergroup' => '50'], ['uid' => 2]);
+        $this->getConnectionPool()->getConnectionForTable('pages')->update('pages', ['perms_everybody' => 31], ['deleted' => 0]);
+        $this->setUpBackendUser(2);
+    }
+
     private function subject(): TaskAjaxController
     {
         return $this->get(TaskAjaxController::class);
@@ -281,24 +301,48 @@ final class TaskCloseActionTest extends FunctionalTestCase
      * resolves the version through that user's workspace. Trusting an empty
      * errorLog here means reporting success, discarding nothing, and closing the
      * task anyway.
+     *
+     * This used to be answered with "switch to the workspace first". It is now
+     * answered by running the discard IN the task's workspace
+     * (TaskWorkspaceScope) - so the proof this test demands is the stronger
+     * one: called from Live, the version is really gone afterwards.
      */
     #[Test]
-    public function discardingFromLiveIsRefusedAndDestroysNothing(): void
+    public function discardingFromLiveRunsInTheTasksWorkspaceAndReallyDiscards(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 'tt_content', 10);
+        $this->editInWorkspace('tt_content', 10, ['header' => 'Intro (draft)']);
+        self::assertGreaterThan(0, $this->versionUidOf('tt_content', 10));
+
+        $GLOBALS['BE_USER']->setWorkspace(0);
+        $payload = $this->decode($this->subject()->closeTaskAction($this->postRequest(['task' => $taskUid, 'mode' => 'discard'])));
+
+        self::assertTrue($payload['success']);
+        self::assertSame(1, $payload['discarded']);
+        self::assertSame(0, $this->versionUidOf('tt_content', 10), 'the version is really gone');
+        self::assertSame(1, (int)$this->taskRow($taskUid)['closed']);
+        self::assertSame(0, (int)$GLOBALS['BE_USER']->workspace, 'and the user was never switched');
+    }
+
+    /**
+     * What still refuses: a workspace the user is no member of. The scope
+     * never grants access, and nothing is destroyed on the way to saying so.
+     */
+    #[Test]
+    public function discardingInAWorkspaceTheUserIsNotAMemberOfIsRefusedAndDestroysNothing(): void
     {
         $taskUid = $this->createTask();
         $this->addMember($taskUid, 'tt_content', 10);
         $this->editInWorkspace('tt_content', 10, ['header' => 'Intro (draft)']);
         $versionUid = $this->versionUidOf('tt_content', 10);
-        self::assertGreaterThan(0, $versionUid);
 
-        $GLOBALS['BE_USER']->setWorkspace(0);
+        $this->givenANonMemberWithPageAccess();
         $response = $this->subject()->closeTaskAction($this->postRequest(['task' => $taskUid, 'mode' => 'discard']));
         $payload = $this->decode($response);
 
         self::assertSame(400, $response->getStatusCode());
-        self::assertFalse($payload['success']);
-        self::assertSame('close-requires-task-workspace', $payload['code']);
-        self::assertStringContainsString('Editorial', $payload['message'], 'the message names the workspace to switch to');
+        self::assertSame('no-workspace-access', $payload['code']);
         self::assertSame($versionUid, $this->versionUidOf('tt_content', 10), 'nothing was discarded');
         self::assertSame(0, (int)$this->taskRow($taskUid)['closed'], 'and the task stays open');
     }
@@ -419,17 +463,32 @@ final class TaskCloseActionTest extends FunctionalTestCase
     }
 
     /**
-     * The dialog greys the discard option out rather than letting an editor pick
-     * something the POST is certain to refuse.
+     * The dialog offers discarding from Live too, now that it works from
+     * there, and greys it out only for someone who is no member of the
+     * task's workspace - saying so rather than failing on submit.
      */
     #[Test]
-    public function thePreviewSaysWhyDiscardingIsUnavailableFromLive(): void
+    public function thePreviewOffersDiscardingFromLive(): void
     {
         $taskUid = $this->createTask();
         $this->addMember($taskUid, 'tt_content', 10);
         $this->editInWorkspace('tt_content', 10, ['header' => 'Intro (draft)']);
 
         $GLOBALS['BE_USER']->setWorkspace(0);
+        $payload = $this->decode($this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid])));
+
+        self::assertTrue($payload['canDiscard']);
+        self::assertSame('', $payload['discardBlockedReason']);
+    }
+
+    #[Test]
+    public function thePreviewSaysWhyDiscardingIsUnavailableToANonMember(): void
+    {
+        $taskUid = $this->createTask();
+        $this->addMember($taskUid, 'tt_content', 10);
+        $this->editInWorkspace('tt_content', 10, ['header' => 'Intro (draft)']);
+
+        $this->givenANonMemberWithPageAccess();
         $payload = $this->decode($this->subject()->closePreviewAction($this->getRequest(['task' => $taskUid])));
 
         self::assertFalse($payload['canDiscard']);

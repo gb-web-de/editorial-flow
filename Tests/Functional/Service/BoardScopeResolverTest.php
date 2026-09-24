@@ -95,4 +95,68 @@ final class BoardScopeResolverTest extends FunctionalTestCase
             $this->subject()->resolveWorkspaceRootPageUids($workspaceUid, $GLOBALS['BE_USER']),
         );
     }
+
+    /**
+     * A page created inside a workspace has a task but no live uid in the
+     * page tree. Unless the scope adds it, no board ever queries its
+     * subject_pid - the new blog post had a card nobody could see.
+     */
+    #[Test]
+    public function aPageBornInAnAccessibleWorkspaceIsPartOfTheScope(): void
+    {
+        $newPage = $this->insertWorkspaceBornPage(2, 1);
+        $nestedPage = $this->insertWorkspaceBornPage($newPage, 1);
+
+        self::assertEqualsCanonicalizing(
+            [1, 2, $newPage, $nestedPage],
+            $this->subject()->resolvePageUids(1, 999, $GLOBALS['BE_USER'], [1]),
+        );
+        self::assertEqualsCanonicalizing(
+            [1, 2, $newPage, $nestedPage],
+            $this->subject()->resolveRootPageUidsForWorkspaces([1], $GLOBALS['BE_USER']),
+        );
+    }
+
+    #[Test]
+    public function aPageBornInAWorkspaceOutsideTheGivenOnesStaysOut(): void
+    {
+        $this->insertWorkspaceBornPage(2, 7);
+
+        self::assertEqualsCanonicalizing([1, 2], $this->subject()->resolvePageUids(1, 999, $GLOBALS['BE_USER'], [1]));
+        self::assertEqualsCanonicalizing([1, 2], $this->subject()->resolvePageUids(1, 999, $GLOBALS['BE_USER']));
+    }
+
+    /**
+     * The root scope of several workspaces is their union - one board for a
+     * coach who looks after several teams.
+     */
+    #[Test]
+    public function theRootScopeOfSeveralWorkspacesIsTheirUnion(): void
+    {
+        $connection = $this->getConnectionPool()->getConnectionForTable('pages');
+        $connection->insert('pages', ['uid' => 3, 'pid' => 0, 'title' => 'Team B root', 'doktype' => 1]);
+        $workspaces = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '2'], ['uid' => 1]);
+        $workspaces->insert('sys_workspace', ['uid' => 2, 'title' => 'Team B', 'db_mountpoints' => '3']);
+
+        self::assertEqualsCanonicalizing(
+            [2, 3],
+            $this->subject()->resolveRootPageUidsForWorkspaces([1, 2], $GLOBALS['BE_USER']),
+        );
+    }
+
+    private function insertWorkspaceBornPage(int $pid, int $workspaceUid): int
+    {
+        $connection = $this->getConnectionPool()->getConnectionForTable('pages');
+        $connection->insert('pages', [
+            'pid' => $pid,
+            'title' => 'New in workspace ' . $workspaceUid,
+            'doktype' => 1,
+            't3ver_wsid' => $workspaceUid,
+            't3ver_oid' => 0,
+            't3ver_state' => 1,
+        ]);
+
+        return (int)$connection->lastInsertId();
+    }
 }

@@ -39,13 +39,30 @@ use TYPO3\CMS\Workspaces\Service\WorkspaceService;
  *  - Bit unset: whoever may publish, publishes - straight from the card, at any
  *    stage. The fast lane for a small team where review is a convention rather
  *    than a gate.
- *  - Bit set: no Publish button anywhere until the task reaches the publish
- *    stage. The strict lane, where work has to be walked through the stages.
+ *  - Bit set: the task has to reach the publish stage first. Someone core
+ *    itself lets walk it there - who may act on the stage it sits in AND on
+ *    the publish stage, which core reserves for workspace owners and admins
+ *    (BackendUserAuthentication::workspaceCheckStageForCurrent()) - gets the
+ *    Publish button anyway, and the walk is made for them as a recorded stage
+ *    change (TaskAjaxController::walkToPublishStageAndPublish()). A plain
+ *    member still sees no button until the task has been sent there.
+ *
+ * That last part corrects the first version of this gate, which refused
+ * everyone below the publish stage. It closed the real hole - a member with
+ * live access publishing straight out of Editing - but also made a coach who
+ * owns the workspace, and so could move the card to "Ready to publish" in one
+ * drag anyway, do exactly that drag before every single publish. Granting the
+ * click to whoever may already make the drag grants nothing new.
+ *
+ * Both stage questions read the CURRENT workspace's stage owners, so they are
+ * asked inside the task's own workspace (TaskWorkspaceScope) - the answer must
+ * not depend on which workspace the user's selector happens to point at.
  */
 final readonly class TaskPublishGate
 {
     public function __construct(
         private WorkspacePublishGate $workspacePublishGate,
+        private TaskWorkspaceScope $workspaceScope,
     ) {
     }
 
@@ -76,10 +93,46 @@ final readonly class TaskPublishGate
             return false;
         }
 
-        if (!((int)($workspaceAccess['publish_access'] ?? 0) & WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE)) {
+        if (!$this->requiresPublishStage($workspaceAccess) || $stageUid === StagesService::STAGE_PUBLISH_ID) {
             return true;
         }
 
-        return $stageUid === StagesService::STAGE_PUBLISH_ID;
+        return $this->mayWalkToPublishStage($user, $workspaceUid, $stageUid);
+    }
+
+    /**
+     * Whether publishing this task has to move it to the publish stage first -
+     * true only where isGranted() let it through on mayWalkToPublishStage().
+     */
+    public function needsWalkToPublishStage(BackendUserAuthentication $user, int $workspaceUid, int $stageUid): bool
+    {
+        if ($stageUid === StagesService::STAGE_PUBLISH_ID) {
+            return false;
+        }
+        $workspaceAccess = $user->checkWorkspace($workspaceUid);
+
+        return is_array($workspaceAccess) && $this->requiresPublishStage($workspaceAccess);
+    }
+
+    /**
+     * @param array<string, mixed> $workspaceAccess
+     */
+    private function requiresPublishStage(array $workspaceAccess): bool
+    {
+        return ((int)($workspaceAccess['publish_access'] ?? 0) & WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE) !== 0;
+    }
+
+    private function mayWalkToPublishStage(BackendUserAuthentication $user, int $workspaceUid, int $stageUid): bool
+    {
+        try {
+            return $this->workspaceScope->run(
+                $user,
+                $workspaceUid,
+                static fn (): bool => $user->workspaceCheckStageForCurrent($stageUid)
+                    && $user->workspaceCheckStageForCurrent(StagesService::STAGE_PUBLISH_ID),
+            );
+        } catch (WorkspaceAccessDenied) {
+            return false;
+        }
     }
 }

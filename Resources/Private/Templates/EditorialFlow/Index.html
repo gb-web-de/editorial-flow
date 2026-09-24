@@ -106,6 +106,7 @@
                          data-editorialflow-column="{column.key}"
                          data-editorialflow-state="{column.state}"
                          data-editorialflow-stage="{column.stageUid}"
+                         data-editorialflow-stage-map="{column.stageMapJson}"
                          data-editorialflow-workspace="{workspaceUid}"
                          data-editorialflow-accepts-drop="{f:if(condition: column.acceptsDrop, then: 'true', else: 'false')}"
                          data-editorialflow-checklist-items="{column.checklistItemsJson}"
@@ -224,9 +225,17 @@
                                                 <core:icon identifier="actions-info" size="small" /> {card.warnedCount} shared
                                             </span>
                                         </f:if>
-                                        <f:if condition="{card.foreignWorkspace}">
-                                            <span class="badge editorialflow-badge-foreign-workspace" title="Belongs to workspace &quot;{card.foreignWorkspaceTitle}&quot; - switch to it to act on this task">
-                                                <core:icon identifier="actions-workspace" size="small" /> {card.foreignWorkspaceTitle}
+                                        <f:comment>
+                                            Which workspace a card belongs to, whenever that is not
+                                            the one selected in the header. A label, not a warning:
+                                            the card is moved and published right here, in its own
+                                            workspace. Only foreignWorkspace (not a member at all)
+                                            still means read-only.
+                                        </f:comment>
+                                        <f:if condition="{card.otherWorkspace}">
+                                            <span class="badge editorialflow-badge-foreign-workspace"
+                                                  title="Workspace: {card.workspaceTitle}{f:if(condition: card.foreignWorkspace, then: ' (read-only)')}">
+                                                <core:icon identifier="actions-workspace" size="small" /> {card.workspaceTitle}
                                             </span>
                                         </f:if>
                                         <f:if condition="{card.hasConflict}">

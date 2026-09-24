@@ -272,9 +272,12 @@ final class BoardColumnRegistryTest extends FunctionalTestCase
         self::assertTrue($legalReview['colorOwn']);
         self::assertSame('Legal', $legalReview['contributingWorkspaceTitles']);
         self::assertStringContainsString('magenta', $legalReview['style']);
-        // The active workspace (1) has no such stage - nothing to drop onto.
+        // The active workspace (1) has no such stage, but Legal's own cards
+        // still move through it from this board: board.js looks the card's
+        // workspace up in the stage map, and the move runs in that workspace.
         self::assertNull($legalReview['stageUid']);
-        self::assertFalse($legalReview['acceptsDrop']);
+        self::assertTrue($legalReview['acceptsDrop']);
+        self::assertSame(['2' => 100], json_decode($legalReview['stageMapJson'], true));
     }
 
     #[Test]
@@ -292,7 +295,8 @@ final class BoardColumnRegistryTest extends FunctionalTestCase
         self::assertTrue($legalReview['colorShared']);
         self::assertFalse($legalReview['colorOwn']);
         self::assertNull($legalReview['stageUid']);
-        self::assertFalse($legalReview['acceptsDrop']);
+        self::assertTrue($legalReview['acceptsDrop']);
+        self::assertSame(['2' => 100, '3' => 101], json_decode($legalReview['stageMapJson'], true));
     }
 
     #[Test]

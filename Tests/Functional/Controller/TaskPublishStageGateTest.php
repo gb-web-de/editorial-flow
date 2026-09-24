@@ -8,7 +8,9 @@ use GbWeb\EditorialFlow\Controller\TaskAjaxController;
 use PHPUnit\Framework\Attributes\Test;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
+use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Http\ServerRequest;
+use TYPO3\CMS\Core\Utility\GeneralUtility;
 use TYPO3\CMS\Workspaces\Service\StagesService;
 use TYPO3\CMS\Workspaces\Service\WorkspaceService;
 use TYPO3\TestingFramework\Core\Functional\FunctionalTestCase;
@@ -52,9 +54,9 @@ final class TaskPublishStageGateTest extends FunctionalTestCase
     }
 
     #[Test]
-    public function publishingFromTheEditStageIsRefusedWhenTheWorkspaceRequiresThePublishStage(): void
+    public function aMemberPublishingFromTheEditStageIsRefusedWhenTheWorkspaceRequiresThePublishStage(): void
     {
-        $this->givenWorkspace(WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE);
+        $this->givenWorkspaceWithMember(WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE);
         $taskUid = $this->createOpenTask(StagesService::STAGE_EDIT_ID);
 
         $payload = $this->decode($this->publish($taskUid));
@@ -72,28 +74,44 @@ final class TaskPublishStageGateTest extends FunctionalTestCase
      * DataHandlerHook decides it.
      */
     #[Test]
-    public function publishingFromACustomReviewStageIsRefusedTheSameWay(): void
+    public function aMemberPublishingFromACustomReviewStageIsRefusedTheSameWay(): void
     {
-        $this->givenWorkspace(WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE);
+        $this->givenWorkspaceWithMember(WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE);
         $taskUid = $this->createOpenTask(3);
 
         self::assertSame('publish-not-permitted', $this->decode($this->publish($taskUid))['code']);
     }
 
     /**
-     * The admin bypass in WorkspacePublishGate::isGranted() stops at the role
-     * question. checkWorkspace() hands admins the full workspace record, so the
-     * publish_access bit applies to them like to anyone else - which is why the
-     * board could not promise "button visible means it works" without this.
+     * An admin (like a workspace owner) may act on every stage, "Ready to
+     * publish" included, so core would let them drag the card there and then
+     * publish. The Publish button does both in one go - and records the walk,
+     * so the stage restriction is honoured rather than skipped: the version is
+     * in the publish stage when core publishes it, and the trail says so.
+     *
+     * This replaces beingAdminDoesNotBypassTheStageRestriction, which asserted
+     * a refusal. That refusal was the over-correction TaskPublishGate's
+     * docblock describes: it made every owner drag before every publish.
      */
     #[Test]
-    public function beingAdminDoesNotBypassTheStageRestriction(): void
+    public function anAdminPublishingFromTheEditStageIsWalkedThroughThePublishStageFirst(): void
     {
         $this->givenWorkspace(WorkspaceService::PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE);
         self::assertTrue($GLOBALS['BE_USER']->isAdmin());
-        $taskUid = $this->createOpenTask(StagesService::STAGE_EDIT_ID);
+        $taskUid = $this->editPageInWorkspace('About us (approved)');
+        // Back on Live, as a coach who never switched would be.
+        $GLOBALS['BE_USER']->setWorkspace(0);
 
-        self::assertSame('publish-not-permitted', $this->decode($this->publish($taskUid))['code']);
+        $payload = $this->decode($this->publish($taskUid));
+
+        self::assertTrue($payload['success'], (string)($payload['message'] ?? ''));
+        self::assertSame('About us (approved)', $this->liveTitleOfPage(2));
+        $stageChanges = array_values(array_filter(
+            $this->activityOf($taskUid),
+            static fn (array $row): bool => $row['event'] === 'stage_changed',
+        ));
+        self::assertCount(1, $stageChanges);
+        self::assertSame(StagesService::STAGE_PUBLISH_ID, json_decode($stageChanges[0]['payload'], true)['to_stage']);
     }
 
     /**
@@ -135,6 +153,66 @@ final class TaskPublishStageGateTest extends FunctionalTestCase
 
         $backendUser = $this->setUpBackendUser(1);
         $backendUser->workspace = $this->workspaceUid;
+    }
+
+    /**
+     * A plain member with live access: WorkspacePublishGate's second branch
+     * lets them publish at all, core's stage rules let them act on Editing
+     * only - exactly the user the stage restriction exists for.
+     */
+    private function givenWorkspaceWithMember(int $publishAccess): void
+    {
+        $connection = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
+        $connection->insert('sys_workspace', [
+            'pid' => 0,
+            'title' => 'Editorial',
+            'publish_access' => $publishAccess,
+            'members' => 'be_users_2',
+            'deleted' => 0,
+        ]);
+        $this->workspaceUid = (int)$connection->lastInsertId();
+        $this->getConnectionPool()->getConnectionForTable('be_users')
+            ->update('be_users', ['workspace_perms' => 1], ['uid' => 2]);
+
+        $backendUser = $this->setUpBackendUser(2);
+        $backendUser->setWorkspace($this->workspaceUid);
+    }
+
+    /**
+     * A real pending version and the task auto-creation opens for it.
+     */
+    private function editPageInWorkspace(string $title): int
+    {
+        $GLOBALS['BE_USER']->setWorkspace($this->workspaceUid);
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['pages' => [2 => ['title' => $title]]], []);
+        $dataHandler->process_datamap();
+
+        $queryBuilder = $this->getConnectionPool()->getQueryBuilderForTable('tx_editorialflow_task');
+        return (int)$queryBuilder->select('uid')->from('tx_editorialflow_task')->executeQuery()->fetchOne();
+    }
+
+    private function liveTitleOfPage(int $uid): string
+    {
+        $queryBuilder = $this->getConnectionPool()->getQueryBuilderForTable('pages');
+        $queryBuilder->getRestrictions()->removeAll();
+
+        return (string)$queryBuilder->select('title')->from('pages')
+            ->where($queryBuilder->expr()->eq('uid', $uid))
+            ->executeQuery()->fetchOne();
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function activityOf(int $taskUid): array
+    {
+        $queryBuilder = $this->getConnectionPool()->getQueryBuilderForTable('tx_editorialflow_activity');
+        $queryBuilder->getRestrictions()->removeAll();
+
+        return $queryBuilder->select('*')->from('tx_editorialflow_activity')
+            ->where($queryBuilder->expr()->eq('task', $taskUid))
+            ->executeQuery()->fetchAllAssociative();
     }
 
     private function createOpenTask(int $stageUid): int

@@ -26,13 +26,15 @@ export function registerDragAndDrop(board) {
    * never a target for your card, and painting it like a rejected action reads
    * as a fault the editor could have avoided.
    *
-   * A foreign step is recognised by its own state rather than by the drop
-   * answer: BoardColumnRegistry gives a column `foreign_stage` exactly when the
-   * active workspace has no stage of that name.
+   * A foreign step is one the DRAGGED card's workspace has no stage for -
+   * asked per card, since a board shows cards from several workspaces and
+   * each of them moves within its own chain.
    */
   const updateDropTargetStyles = (card) => {
     board.board.querySelectorAll('.editorialflow-column').forEach((column) => {
-      const foreign = column.dataset.editorialflowState === 'foreign_stage';
+      const foreign = board.isStageColumn(column)
+        && parseInt(card.dataset.editorialflowWorkspace || '0', 10) > 0
+        && board.columnStageFor(card, column) === null;
       const valid = !foreign && board.canDropCardIntoColumn(card, column);
 
       column.classList.toggle('is-drop-target-valid', valid);

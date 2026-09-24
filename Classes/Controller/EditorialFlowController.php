@@ -11,6 +11,7 @@ use GbWeb\EditorialFlow\Service\BoardColumnRegistry;
 use GbWeb\EditorialFlow\Service\BoardScopeResolver;
 use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
+use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
 use Psr\Http\Message\ResponseInterface;
 use TYPO3\CMS\Backend\Attribute\AsController;
@@ -33,6 +34,14 @@ use TYPO3\CMS\Workspaces\Service\WorkspaceService;
 #[AsController]
 final class EditorialFlowController extends ActionController
 {
+    /**
+     * Per-request title cache: a board lists dozens of cards from a handful
+     * of workspaces.
+     *
+     * @var array<int, string>
+     */
+    private array $workspaceTitles = [];
+
     public function __construct(
         protected readonly ModuleTemplateFactory $moduleTemplateFactory,
         protected readonly PageRenderer $pageRenderer,
@@ -46,6 +55,7 @@ final class EditorialFlowController extends ActionController
         protected readonly AssignableUserProvider $assignableUserProvider,
         protected readonly ActiveTaskSession $activeTaskSession,
         protected readonly WorkspaceConflictDetector $conflictDetector,
+        protected readonly TaskWorkspaceScope $workspaceScope,
     ) {
     }
 
@@ -90,7 +100,11 @@ final class EditorialFlowController extends ActionController
 
         $moduleTemplate->assignMultiple([
             'pageUid' => $pageUid,
-            'pageSelected' => $pageUid > 0,
+            // The workspace-root scope needs no page: it is "everything my
+            // workspaces cover". Asking a coach to pick a page first, only to
+            // be shown the same board whichever one they pick, was one more
+            // step between opening the module and seeing what waits for them.
+            'pageSelected' => $pageUid > 0 || $this->coversWorkspaceRoots($fromWorkspaceRoot, $workspaceUid, $otherWorkspaceUids),
             'workspaceUid' => $workspaceUid,
             'columns' => $columns,
             'otherWorkspaces' => $otherWorkspaces,
@@ -188,13 +202,18 @@ final class EditorialFlowController extends ActionController
         array $otherWorkspaceUids,
     ): array {
         $columns = $this->boardColumnRegistry->getColumns($backendUser, $workspaceUid, $otherWorkspaceUids);
-        if ($pageUid < 1) {
+        $coversWorkspaceRoots = $this->coversWorkspaceRoots($fromWorkspaceRoot, $workspaceUid, $otherWorkspaceUids);
+        if ($pageUid < 1 && !$coversWorkspaceRoots) {
             return $columns;
         }
 
-        if ($fromWorkspaceRoot && $workspaceUid > 0) {
-            $pageUids = $this->boardScopeResolver->resolveWorkspaceRootPageUids($workspaceUid, $backendUser);
-            if ($pageUids === []) {
+        // Every workspace the user may enter, not only the selected one: a
+        // coach owning three team workspaces sees all three teams' work on one
+        // board and acts on it from here (see TaskWorkspaceScope).
+        $accessibleWorkspaceUids = $this->accessibleWorkspaceUids($workspaceUid, $otherWorkspaceUids);
+        if ($coversWorkspaceRoots) {
+            $pageUids = $this->boardScopeResolver->resolveRootPageUidsForWorkspaces($accessibleWorkspaceUids, $backendUser);
+            if ($pageUids === [] && $pageUid > 0) {
                 // BoardScopeResolver already falls back from an empty db_mountpoints
                 // to the installation's pid=0/is_siteroot pages, so this only fires
                 // when even that yields nothing accessible - fall back to "just the
@@ -202,7 +221,7 @@ final class EditorialFlowController extends ActionController
                 $pageUids = $this->boardScopeResolver->resolvePageUids($pageUid, 0, $backendUser);
             }
         } else {
-            $pageUids = $this->boardScopeResolver->resolvePageUids($pageUid, $depth, $backendUser);
+            $pageUids = $this->boardScopeResolver->resolvePageUids($pageUid, $depth, $backendUser, $accessibleWorkspaceUids);
         }
 
         $tasks = $this->taskRepository->findForBoard($pageUids);
@@ -262,12 +281,18 @@ final class EditorialFlowController extends ActionController
             // card - and the workspace filter could hide the Done column's
             // contents from the very editor who closed them.
             $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);
-            $task['foreignWorkspace'] = (int)($task['closed'] ?? 0) === 0
-                && $taskWorkspaceUid > 0
-                && $taskWorkspaceUid !== $workspaceUid;
+            $isOpen = (int)($task['closed'] ?? 0) === 0;
+            // "Other workspace" is now a label, not a lock. A task from a
+            // workspace the user belongs to is acted on in THAT workspace
+            // (TaskWorkspaceScope), so it is draggable and publishable right
+            // here, exactly as if the user had switched. Only a workspace the
+            // user has no access to at all keeps the card read-only.
+            $task['otherWorkspace'] = $isOpen && $taskWorkspaceUid > 0 && $taskWorkspaceUid !== $workspaceUid;
+            $task['workspaceTitle'] = $taskWorkspaceUid > 0 ? $this->workspaceTitle($taskWorkspaceUid) : '';
+            $task['foreignWorkspace'] = $task['otherWorkspace']
+                && !$this->workspaceScope->canEnter($backendUser, $taskWorkspaceUid);
+            $task['foreignWorkspaceTitle'] = $task['workspaceTitle'];
             if ($task['foreignWorkspace']) {
-                $foreignWorkspaceRecord = BackendUtility::getRecord('sys_workspace', $taskWorkspaceUid, 'title');
-                $task['foreignWorkspaceTitle'] = $foreignWorkspaceRecord['title'] ?? ('#' . $taskWorkspaceUid);
                 $task['canAct'] = false;
                 $task['canPublish'] = false;
                 return $task;
@@ -289,7 +314,18 @@ final class EditorialFlowController extends ActionController
             // team, several of either combined, or a group with every editor in
             // it for "anyone may act here". Editorial Flow deliberately adds no
             // parallel permission model of its own on top of it.
-            $task['canAct'] = $backendUser->workspaceCheckStageForCurrent((int)($task['stage_uid'] ?? 0));
+            //
+            // Asked inside the task's own workspace: the method reads the stage
+            // owners of the CURRENT workspace record, so asked from anywhere
+            // else it answers for the wrong workspace's stages.
+            $stageUid = (int)($task['stage_uid'] ?? 0);
+            $task['canAct'] = $taskWorkspaceUid > 0
+                ? $this->workspaceScope->run(
+                    $backendUser,
+                    $taskWorkspaceUid,
+                    static fn (): bool => $backendUser->workspaceCheckStageForCurrent($stageUid),
+                )
+                : $backendUser->workspaceCheckStageForCurrent($stageUid);
 
             // Per card, not per board: with the workspace's
             // PUBLISH_ACCESS_ONLY_IN_PUBLISH_STAGE bit set, the answer differs
@@ -297,11 +333,11 @@ final class EditorialFlowController extends ActionController
             // stage each of them sits in. The view renders the Publish button
             // from this flag alone, and publishTaskAction() refuses on the same
             // gate - so a button that is there is a button that works.
-            $task['canPublish'] = (int)($task['closed'] ?? 0) === 0
+            $task['canPublish'] = $isOpen
                 && $this->taskPublishGate->isGranted(
                     $backendUser,
                     $taskWorkspaceUid,
-                    (int)($task['stage_uid'] ?? 0),
+                    $stageUid,
                 );
             return $task;
         }, $tasks);
@@ -318,6 +354,33 @@ final class EditorialFlowController extends ActionController
         }
 
         return $board;
+    }
+
+    /**
+     * @param list<int> $otherWorkspaceUids
+     */
+    private function coversWorkspaceRoots(bool $fromWorkspaceRoot, int $workspaceUid, array $otherWorkspaceUids): bool
+    {
+        return $fromWorkspaceRoot && $this->accessibleWorkspaceUids($workspaceUid, $otherWorkspaceUids) !== [];
+    }
+
+    /**
+     * @param list<int> $otherWorkspaceUids
+     * @return list<int>
+     */
+    private function accessibleWorkspaceUids(int $workspaceUid, array $otherWorkspaceUids): array
+    {
+        return array_values(array_unique(array_filter(
+            array_merge([$workspaceUid], $otherWorkspaceUids),
+            static fn (int $uid): bool => $uid > 0,
+        )));
+    }
+
+    private function workspaceTitle(int $workspaceUid): string
+    {
+        return $this->workspaceTitles[$workspaceUid] ??= (string)(
+            BackendUtility::getRecord('sys_workspace', $workspaceUid, 'title')['title'] ?? ('#' . $workspaceUid)
+        );
     }
 
     /**

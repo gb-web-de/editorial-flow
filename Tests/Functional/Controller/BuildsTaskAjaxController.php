@@ -20,11 +20,13 @@ use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use GbWeb\EditorialFlow\Service\TaskPublishGate;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
+use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
 use GbWeb\EditorialFlow\Service\WorkspaceIntegrationService;
 use Psr\Log\LoggerInterface;
 use Psr\Log\NullLogger;
 use TYPO3\CMS\Backend\Routing\UriBuilder;
+use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Imaging\IconFactory;
 use TYPO3\CMS\Core\Schema\TcaSchemaFactory;
@@ -89,7 +91,7 @@ trait BuildsTaskAjaxController
             // Constructed rather than fetched: TaskPublishGate is private like
             // every other service of this extension, and the core gate it wraps
             // is public already.
-            new TaskPublishGate($this->get(WorkspacePublishGate::class)),
+            new TaskPublishGate($this->get(WorkspacePublishGate::class), new TaskWorkspaceScope($this->get(Context::class))),
             $this->get(StageTransitionService::class),
             $this->get(TaskEventPublisher::class),
             $this->get(StagesService::class),
@@ -97,6 +99,7 @@ trait BuildsTaskAjaxController
             $this->get(ViewFactoryInterface::class),
             $logger ?? new NullLogger(),
             $this->get(WorkspaceConflictDetector::class),
+            new TaskWorkspaceScope($this->get(Context::class)),
         );
     }
 }
