@@ -192,4 +192,40 @@ final class MigrateExistingWorkspaceChangesToTasksUpdateTest extends FunctionalT
         self::assertTrue($this->subject()->executeUpdate());
         self::assertCount(1, $this->selectAll('tx_editorialflow_task'), 'no second task should appear');
     }
+
+    /**
+     * A page created inside a workspace before tasks were opened for new
+     * records - the blog post EXT:handball's match report wrote, with its
+     * content. One task for the page, the content on it, nothing on its own.
+     */
+    #[Test]
+    public function aPageCreatedInsideAWorkspaceGetsOneTaskCoveringItsContent(): void
+    {
+        $pages = $this->getConnectionPool()->getConnectionForTable('pages');
+        $pages->insert('pages', [
+            'pid' => 1, 'title' => 'C1 wins at home', 'doktype' => 1,
+            't3ver_oid' => 0, 't3ver_wsid' => 1, 't3ver_state' => 1,
+        ]);
+        $pageUid = (int)$pages->lastInsertId();
+        $content = $this->getConnectionPool()->getConnectionForTable('tt_content');
+        $content->insert('tt_content', [
+            'pid' => $pageUid, 'header' => 'Report', 'CType' => 'text',
+            't3ver_oid' => 0, 't3ver_wsid' => 1, 't3ver_state' => 1,
+        ]);
+        $contentUid = (int)$content->lastInsertId();
+
+        self::assertTrue($this->subject()->updateNecessary());
+        $this->subject()->executeUpdate();
+
+        $tasks = $this->selectAll('tx_editorialflow_task');
+        self::assertCount(1, $tasks);
+        self::assertSame($pageUid, (int)$tasks[0]['subject_uid']);
+        self::assertSame(1, (int)$tasks[0]['workspace_uid']);
+        $members = array_map(
+            static fn (array $item): string => $item['record_table'] . ':' . $item['record_uid'],
+            $this->selectAll('tx_editorialflow_task_item'),
+        );
+        self::assertContains('tt_content:' . $contentUid, $members);
+        self::assertFalse($this->subject()->updateNecessary());
+    }
 }

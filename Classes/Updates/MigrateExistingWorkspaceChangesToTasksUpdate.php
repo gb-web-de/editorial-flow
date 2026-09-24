@@ -15,6 +15,7 @@ use TYPO3\CMS\Core\Upgrades\ChattyInterface;
 use TYPO3\CMS\Core\Upgrades\DatabaseUpdatedPrerequisite;
 use TYPO3\CMS\Core\Upgrades\ReferenceIndexUpdatedPrerequisite;
 use TYPO3\CMS\Core\Upgrades\UpgradeWizardInterface;
+use TYPO3\CMS\Core\Versioning\VersionState;
 
 /**
  * Backfills Editorial Flow tasks for workspace changes that already existed before
@@ -121,6 +122,13 @@ final class MigrateExistingWorkspaceChangesToTasksUpdate implements UpgradeWizar
 
         $result = [];
         foreach ($tables as $table) {
+            foreach ($this->findWorkspaceBornRecords($table) as $row) {
+                $result[] = $row;
+                if ($limit > 0 && count($result) >= $limit) {
+                    return $result;
+                }
+            }
+
             $queryBuilder = $this->connectionPool->getQueryBuilderForTable($table);
             $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
             $queryBuilder
@@ -167,5 +175,58 @@ final class MigrateExistingWorkspaceChangesToTasksUpdate implements UpgradeWizar
         }
 
         return $result;
+    }
+
+    /**
+     * Records CREATED inside a workspace that no task covers.
+     *
+     * The query above only knows versions of live records (`t3ver_oid > 0`). A
+     * record born in a workspace is a single row with t3ver_oid 0 and
+     * t3ver_state 1 - its own uid is both "live" and "version" - and until
+     * TaskAutoCreationService learned to capture 'new', every such record was
+     * left without a task: new pages, new blog posts, and the content on them.
+     * This is how those are picked up after the fact.
+     *
+     * @return list<array{table: string, liveUid: int, versionUid: int, workspaceUid: int}>
+     */
+    private function findWorkspaceBornRecords(string $table): array
+    {
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable($table);
+        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+        $queryBuilder
+            ->select('t.uid', 't.t3ver_wsid')
+            ->from($table, 't')
+            ->leftJoin(
+                't',
+                self::TASK_ITEM_TABLE,
+                'ti',
+                (string)$queryBuilder->expr()->and(
+                    $queryBuilder->expr()->eq('ti.record_table', $queryBuilder->createNamedParameter($table)),
+                    $queryBuilder->expr()->eq('ti.record_uid', $queryBuilder->quoteIdentifier('t.uid')),
+                    $queryBuilder->expr()->eq('ti.deleted', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                ),
+            )
+            ->where(
+                $queryBuilder->expr()->eq('t.t3ver_oid', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $queryBuilder->expr()->gt('t.t3ver_wsid', $queryBuilder->createNamedParameter(0, Connection::PARAM_INT)),
+                $queryBuilder->expr()->eq('t.t3ver_state', $queryBuilder->createNamedParameter(VersionState::NEW_PLACEHOLDER->value, Connection::PARAM_INT)),
+                $queryBuilder->expr()->isNull('ti.uid'),
+            )
+            // Pages first, so a new page's task exists before the content on it
+            // is routed - the content then joins it instead of opening its own.
+            ->orderBy('t.uid', 'ASC');
+
+        try {
+            $rows = $queryBuilder->executeQuery()->fetchAllAssociative();
+        } catch (\Doctrine\DBAL\Exception) {
+            return [];
+        }
+
+        return array_map(static fn (array $row): array => [
+            'table' => $table,
+            'liveUid' => (int)$row['uid'],
+            'versionUid' => (int)$row['uid'],
+            'workspaceUid' => (int)$row['t3ver_wsid'],
+        ], $rows);
     }
 }
