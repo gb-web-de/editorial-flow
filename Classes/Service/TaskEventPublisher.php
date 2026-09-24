@@ -207,9 +207,20 @@ final class TaskEventPublisher
      * knows, but also from a CLI or a queue worker where it does not, and a
      * webhook carrying "http://localhost/typo3/..." is worse than one carrying a
      * path the receiver can resolve against the site it already knows.
+     *
+     * SHAREABLE_URL, because this link is shared: it leaves TYPO3 in a webhook
+     * and is opened by someone else, in another session. The default reference
+     * type adds a form-protection token, which is worthless to that person and
+     * - worse - needs a backend SESSION to be generated. From the CLI or the
+     * scheduler there is none, so every DataHandler write inside a workspace
+     * that opened a task (an import, a scheduled sync) died with "Call to a
+     * member function set() on null" half way through the datamap. Only the
+     * path is kept, for the reason above.
      */
     private function boardUrl(int $pageUid): string
     {
-        return (string)$this->uriBuilder->buildUriFromRoute('web_editorialflow', ['id' => $pageUid]);
+        $uri = $this->uriBuilder->buildUriFromRoute('web_editorialflow', ['id' => $pageUid], UriBuilder::SHAREABLE_URL);
+
+        return $uri->getPath() . ($uri->getQuery() !== '' ? '?' . $uri->getQuery() : '');
     }
 }
