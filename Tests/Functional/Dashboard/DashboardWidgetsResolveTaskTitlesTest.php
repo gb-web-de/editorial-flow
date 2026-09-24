@@ -7,8 +7,12 @@ namespace GbWeb\EditorialFlow\Tests\Functional\Dashboard;
 use GbWeb\EditorialFlow\Dashboard\Widget\RecentActivityWidget;
 use GbWeb\EditorialFlow\Dashboard\Widget\RecentCommentsWidget;
 use GbWeb\EditorialFlow\Dashboard\Widget\TaskOverviewWidget;
+use GbWeb\EditorialFlow\Domain\Repository\TaskRepository;
+use GbWeb\EditorialFlow\Service\TaskReadAccess;
+use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
 use PHPUnit\Framework\Attributes\Test;
 use TYPO3\CMS\Backend\View\BackendViewFactory;
+use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Database\ConnectionPool;
 use TYPO3\CMS\Core\Http\ServerRequest;
 use TYPO3\CMS\Core\Settings\Settings;
@@ -85,6 +89,7 @@ final class DashboardWidgetsResolveTaskTitlesTest extends FunctionalTestCase
             new WidgetConfiguration('test', 'test', [], 'Test', '', '', 'medium', 'medium'),
             $this->get(BackendViewFactory::class),
             $this->get(ConnectionPool::class),
+            new TaskReadAccess(new TaskWorkspaceScope($this->get(Context::class)), $this->get(TaskRepository::class)),
         );
 
         $content = $widget->renderWidget($this->context())->content;
@@ -105,6 +110,7 @@ final class DashboardWidgetsResolveTaskTitlesTest extends FunctionalTestCase
             new WidgetConfiguration('test', 'test', [], 'Test', '', '', 'medium', 'medium'),
             $this->get(BackendViewFactory::class),
             $this->get(ConnectionPool::class),
+            new TaskReadAccess(new TaskWorkspaceScope($this->get(Context::class)), $this->get(TaskRepository::class)),
         );
 
         $content = $widget->renderWidget($this->context())->content;

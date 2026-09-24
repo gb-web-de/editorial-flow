@@ -190,6 +190,27 @@ final class WorkspaceIntegrationDiffTest extends FunctionalTestCase
     }
 
     /**
+     * Core's HistoryService escapes the author and the date itself - it feeds
+     * them to its own view as raw output. Ticket.html escapes on output like
+     * every other value, so passed on as they came, "O'Brien & Co" reached the
+     * editor as "O&#039;Brien &amp; Co".
+     */
+    #[Test]
+    public function theAuthorOfAChangeIsHandedOnUnescaped(): void
+    {
+        $this->getConnectionPool()->getConnectionForTable('be_users')
+            ->update('be_users', ['realName' => 'O\'Brien & <Co>'], ['uid' => 1]);
+        $this->setUpBackendUser(1);
+        $taskUid = $this->createTaskWithManualMember(1, 'pages', 2);
+        $this->editInWorkspace('pages', 2, ['subtitle' => 'Draft subtitle'], 1);
+
+        $details = $this->subject()->getTaskDetails($taskUid);
+
+        self::assertNotSame([], $details['diffs']);
+        self::assertSame('O\'Brien & <Co>', $details['diffs'][0]['user']);
+    }
+
+    /**
      * The stuck state, stated instead of left as a blank ticket.
      *
      * A task holding a workspace with no pending version anywhere refuses every

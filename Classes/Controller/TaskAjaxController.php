@@ -22,6 +22,7 @@ use GbWeb\EditorialFlow\Service\TaskColor;
 use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use GbWeb\EditorialFlow\Service\TaskPublishGate;
+use GbWeb\EditorialFlow\Service\TaskReadAccess;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
 use GbWeb\EditorialFlow\Service\WorkspaceAccessDenied;
@@ -73,6 +74,7 @@ final class TaskAjaxController
         private readonly LoggerInterface $logger,
         private readonly WorkspaceConflictDetector $conflictDetector,
         private readonly TaskWorkspaceScope $workspaceScope,
+        private readonly TaskReadAccess $taskReadAccess,
     ) {
     }
 
@@ -763,6 +765,12 @@ final class TaskAjaxController
         $isPendingPage = $isPendingSubject && (string)$task['subject_table'] === 'pages';
 
         if ($isPendingSubject) {
+            // No record to ask assertMayEdit() about (below) - the bar is the
+            // one filing this ticket took.
+            $error = $this->assertMayWorkOnTask($task);
+            if ($error !== null) {
+                return $this->error($error);
+            }
             if ($state === null) {
                 return $this->reject(
                     'unknown-target-column',
@@ -915,6 +923,10 @@ final class TaskAjaxController
         if ($task instanceof ResponseInterface) {
             return $task;
         }
+        $error = $this->assertMayWorkOnTask($task);
+        if ($error !== null) {
+            return $this->error($error);
+        }
 
         $this->taskRepository->assignTo($taskUid, $beUserId);
 
@@ -937,7 +949,12 @@ final class TaskAjaxController
             $taskUid = (int)($body['task'] ?? 0);
         }
 
-        $details = $this->workspaceService->getTaskDetails($taskUid);
+        $task = $this->taskRepository->findByUid($taskUid);
+        $error = $task === null ? null : $this->assertMayReadTask($task);
+        if ($error !== null) {
+            return $this->error($error);
+        }
+        $details = $task === null ? null : $this->readTaskDetails($task);
         if ($details === null) {
             return $this->reject('task-not-found', 'This task no longer exists.', ['taskUid' => $taskUid]);
         }
@@ -1771,16 +1788,26 @@ final class TaskAjaxController
         try {
             return $this->workspaceScope->run($this->getBackendUser(), $workspaceUid, $work);
         } catch (WorkspaceAccessDenied) {
-            $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
-            return $this->reject(
-                'no-workspace-access',
-                sprintf(
-                    'This task belongs to workspace "%s", and you are not a member of it.',
-                    $titles[$workspaceUid] ?? ('#' . $workspaceUid),
-                ),
-                ['taskUid' => (int)($task['uid'] ?? 0), 'workspaceUid' => $workspaceUid],
-            );
+            return $this->error($this->noWorkspaceAccess($task));
         }
+    }
+
+    /**
+     * @param array<string, mixed> $task
+     */
+    private function noWorkspaceAccess(array $task): TaskActionError
+    {
+        $workspaceUid = (int)($task['workspace_uid'] ?? 0);
+        $titles = $this->conflictDetector->resolveWorkspaceTitles([$workspaceUid]);
+
+        return new TaskActionError(
+            'no-workspace-access',
+            sprintf(
+                'This task belongs to workspace "%s", and you are not a member of it.',
+                $titles[$workspaceUid] ?? ('#' . $workspaceUid),
+            ),
+            ['taskUid' => (int)($task['uid'] ?? 0), 'workspaceUid' => $workspaceUid],
+        );
     }
 
     /**
@@ -2369,6 +2396,169 @@ final class TaskAjaxController
     }
 
     /**
+     * May the current user read this task - its ticket, its details? Asked
+     * here because the route layer does not: a backend AJAX route admits any
+     * logged-in backend user, and a task uid is all these endpoints are sent.
+     * The rule is TaskReadAccess's; a refusal is named after the page the user
+     * cannot see from where they sit.
+     *
+     * @param array<string, mixed> $task
+     */
+    private function assertMayReadTask(array $task): ?TaskActionError
+    {
+        if ($this->taskReadAccess->mayRead($this->getBackendUser(), $task)) {
+            return null;
+        }
+
+        return $this->assertMayReadPage((int)$task['subject_pid'])
+            ?? new TaskActionError('no-task-read-permission', 'You do not have access to this task.', ['taskUid' => (int)$task['uid']]);
+    }
+
+    /**
+     * May the current user see this record's field values, which the version
+     * comparison shows? Core's bar for reading a record in the backend: the
+     * table is in the user's tables_select (tables_modify is folded into it at
+     * login), and the page it sits on - the page itself, for a page - may be
+     * shown.
+     */
+    private function assertMayReadRecord(string $table, int $uid): ?TaskActionError
+    {
+        $backendUser = $this->getBackendUser();
+        if ($backendUser->isAdmin()) {
+            return null;
+        }
+        if (!$backendUser->check('tables_select', $table)) {
+            return new TaskActionError(
+                'no-table-select-permission',
+                sprintf('You do not have access to "%s" records.', $table),
+                ['table' => $table, 'uid' => $uid],
+            );
+        }
+
+        $record = BackendUtility::getRecord($table, $uid, 'uid,pid');
+        if ($record === null) {
+            return new TaskActionError(
+                'record-not-found',
+                sprintf('%s:%d no longer exists.', $table, $uid),
+                ['table' => $table, 'uid' => $uid],
+            );
+        }
+
+        return $this->assertMayReadPage($table === 'pages' ? $uid : (int)$record['pid']);
+    }
+
+    /**
+     * May the current user do this task's bookkeeping - take it, or move a
+     * ticket that has no record yet between the planning columns?
+     *
+     * The bar is the one the task's subject sets. A record that exists: edit
+     * permission on it, as for every other change to it (assertMayEdit()).
+     * One that does not exist yet: what filing the ticket took - creating a
+     * page under the planning page for a planned page, seeing the planning
+     * page for a planned record (TaskWizardProvider::submitCreatePendingPage()
+     * and ::submitCreatePendingRecord()).
+     *
+     * A task that already lives in a workspace is asked in that workspace,
+     * like every other action on it (TaskWorkspaceScope): only its members
+     * get that far, and with that workspace's mounts.
+     *
+     * @param array<string, mixed> $task
+     */
+    private function assertMayWorkOnTask(array $task): ?TaskActionError
+    {
+        $backendUser = $this->getBackendUser();
+        $workspaceUid = (int)$task['workspace_uid'];
+        if ($workspaceUid > 0 && !$this->workspaceScope->canEnter($backendUser, $workspaceUid)) {
+            return $this->noWorkspaceAccess($task);
+        }
+
+        $check = function () use ($task): ?TaskActionError {
+            $table = (string)$task['subject_table'];
+            $uid = (int)$task['subject_uid'];
+            if ($uid > 0) {
+                return $this->assertMayEdit($table, $uid);
+            }
+
+            $planningPid = (int)$task['subject_pid'];
+            if ($table !== 'pages') {
+                return $this->assertMayReadPage($planningPid);
+            }
+            if (!$this->mayCreatePageUnder($planningPid)) {
+                return new TaskActionError(
+                    'no-page-new-permission',
+                    'You are not allowed to create a new page here, so this ticket is not yours to plan.',
+                    ['taskUid' => (int)$task['uid'], 'parentPid' => $planningPid],
+                );
+            }
+            return null;
+        };
+
+        return $workspaceUid > 0
+            ? $this->workspaceScope->run($backendUser, $workspaceUid, $check)
+            : $check();
+    }
+
+    /**
+     * The ticket's data, as the task's own workspace sees it.
+     *
+     * Read inside that workspace for a member, because core only hands a
+     * version's history to a reader sitting in the version's workspace
+     * (RecordHistory::findEventsForRecord()) - read from Live or from another
+     * workspace, a member's own draft showed "No field changes recorded".
+     *
+     * For everyone else the diffs of an open task are withheld: they are the
+     * draft's content, and a draft is its workspace's business - core hides
+     * a workspace's versions from non-members, and so does the ticket. A
+     * closed task's archive names changed fields only, no values
+     * (WorkspaceIntegrationService::getArchivedMemberDiffs()), so there is
+     * nothing to withhold there.
+     *
+     * @param array<string, mixed> $task
+     * @return array<string, mixed>|null null when the task no longer exists
+     */
+    private function readTaskDetails(array $task): ?array
+    {
+        $backendUser = $this->getBackendUser();
+        $taskUid = (int)$task['uid'];
+        $workspaceUid = (int)$task['workspace_uid'];
+        $read = fn (): ?array => $this->workspaceService->getTaskDetails($taskUid);
+
+        if ($workspaceUid < 1) {
+            $details = $read();
+        } elseif ($this->workspaceScope->canEnter($backendUser, $workspaceUid)) {
+            $details = $this->workspaceScope->run($backendUser, $workspaceUid, $read);
+        } else {
+            $details = $read();
+            if ($details !== null && (int)$task['closed'] === 0) {
+                $details['diffs'] = [];
+                $details['members'] = array_map(
+                    static fn (array $member): array => ['hasDiffs' => false] + $member,
+                    $details['members'],
+                );
+                return $details + ['diffsWithheld' => true];
+            }
+        }
+
+        return $details === null ? null : $details + ['diffsWithheld' => false];
+    }
+
+    /**
+     * The HTML endpoints' refusal: the modal they fill shows it as it is.
+     * Logged the way error() logs, so the same code turns up in var/log.
+     */
+    private function refuseHtml(TaskActionError $error): ResponseInterface
+    {
+        $exposed = $this->logAndExposeError($error);
+
+        return new HtmlResponse(
+            '<div class="callout callout-danger"><div class="callout-body">'
+                . htmlspecialchars($exposed['message'], ENT_QUOTES | ENT_HTML5)
+                . '</div></div>',
+            403,
+        );
+    }
+
+    /**
      * May the current user edit this record at all?
      *
      * Every branch names *which* check failed, not just that one did - "no
@@ -2711,7 +2901,12 @@ final class TaskAjaxController
     public function ticketAction(ServerRequestInterface $request): ResponseInterface
     {
         $taskUid = (int)($request->getQueryParams()['task'] ?? 0);
-        $details = $this->workspaceService->getTaskDetails($taskUid);
+        $task = $this->taskRepository->findByUid($taskUid);
+        $error = $task === null ? null : $this->assertMayReadTask($task);
+        if ($error !== null) {
+            return $this->refuseHtml($error);
+        }
+        $details = $task === null ? null : $this->readTaskDetails($task);
         if ($details === null) {
             return new HtmlResponse('<div class="callout callout-danger"><div class="callout-body">Task not found.</div></div>', 404);
         }
@@ -2763,6 +2958,11 @@ final class TaskAjaxController
             );
         }
 
+        $error = $this->assertMayReadRecord($table, $liveUid);
+        if ($error !== null) {
+            return $this->refuseHtml($error);
+        }
+
         $workspaceUids = $this->conflictDetector->findPendingWorkspaces($table, $liveUid);
         if (count($workspaceUids) < 2) {
             return new HtmlResponse(
@@ -2777,7 +2977,15 @@ final class TaskAjaxController
         // same array in the same order so the template can zip header and
         // body via two independent f:for loops, with no dynamic array-key
         // lookups in Fluid.
-        $rows = $this->workspaceService->buildConflictDiff($table, $liveUid, $workspaceUids);
+        //
+        // Every conflicting workspace keeps its column, but only its members
+        // see what it wrote - see buildConflictDiff()'s docblock.
+        $backendUser = $this->getBackendUser();
+        $withheldWorkspaceUids = array_values(array_filter(
+            $workspaceUids,
+            fn (int $workspaceUid): bool => !$this->workspaceScope->canEnter($backendUser, $workspaceUid),
+        ));
+        $rows = $this->workspaceService->buildConflictDiff($table, $liveUid, $workspaceUids, $withheldWorkspaceUids);
         $workspaceTitles = $this->conflictDetector->resolveWorkspaceTitles($workspaceUids);
         $workspaceColumns = array_map(
             static fn (int $workspaceUid): array => ['uid' => $workspaceUid, 'title' => $workspaceTitles[$workspaceUid] ?? ('#' . $workspaceUid)],
@@ -2894,18 +3102,38 @@ final class TaskAjaxController
         if ($task instanceof ResponseInterface) {
             return $task;
         }
+        // Not assertMayWorkOnTask(): the reviewer receiving the task ticks
+        // criteria as much as the editor sending it on, and need not be allowed
+        // to edit the page. Reading the task and belonging to the workspace
+        // whose policy the criteria are is the bar.
+        $workspaceUid = (int)$task['workspace_uid'];
+        $error = $this->assertMayReadTask($task);
+        if ($error === null && $workspaceUid > 0 && !$this->workspaceScope->canEnter($this->getBackendUser(), $workspaceUid)) {
+            $error = $this->noWorkspaceAccess($task);
+        }
+        if ($error !== null) {
+            return $this->error($error);
+        }
         if ($itemUid < 1) {
             return $this->reject('missing-checklist-item', 'No checklist item was specified.', ['taskUid' => $taskUid]);
         }
 
         // Resolved rather than trusted, for the title the activity entry needs -
-        // and because a criterion the client names does not necessarily exist.
+        // and because a criterion the client names does not necessarily exist,
+        // or belong to this task's workspace at all.
         $item = $this->checklistRepository->findItem($itemUid);
         if ($item === null) {
             return $this->reject(
                 'missing-checklist-item',
                 'That acceptance criterion no longer exists.',
                 ['taskUid' => $taskUid, 'itemUid' => $itemUid],
+            );
+        }
+        if ((int)$item['workspace_uid'] !== $workspaceUid) {
+            return $this->reject(
+                'foreign-checklist-item',
+                'That acceptance criterion belongs to another workspace, not to this task.',
+                ['taskUid' => $taskUid, 'itemUid' => $itemUid, 'itemWorkspaceUid' => (int)$item['workspace_uid']],
             );
         }
 
@@ -2965,18 +3193,30 @@ final class TaskAjaxController
     public function checklistRemoveAction(ServerRequestInterface $request): ResponseInterface
     {
         $body = $this->getBody($request);
-        $workspaceUid = (int)($body['workspaceUid'] ?? 0);
         $itemUid = (int)($body['itemUid'] ?? 0);
 
+        if ($itemUid < 1) {
+            return $this->reject('missing-checklist-item', 'No checklist item was specified.', []);
+        }
+        $item = $this->checklistRepository->findItem($itemUid);
+        if ($item === null) {
+            return $this->reject(
+                'missing-checklist-item',
+                'That acceptance criterion no longer exists.',
+                ['itemUid' => $itemUid],
+            );
+        }
+
+        // The criterion's own workspace, never the one the request names: the
+        // client still sends workspaceUid, and owning that one said nothing
+        // about the item it named alongside.
+        $workspaceUid = (int)$item['workspace_uid'];
         if (!$this->canManageChecklist($workspaceUid)) {
             return $this->reject(
                 'checklist-not-permitted',
                 'You are not allowed to manage this workspace\'s checklists.',
-                ['workspaceUid' => $workspaceUid],
+                ['workspaceUid' => $workspaceUid, 'itemUid' => $itemUid],
             );
-        }
-        if ($itemUid < 1) {
-            return $this->reject('missing-checklist-item', 'No checklist item was specified.', ['workspaceUid' => $workspaceUid]);
         }
 
         $this->checklistRepository->removeItem($itemUid);

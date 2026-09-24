@@ -19,6 +19,7 @@ use GbWeb\EditorialFlow\Service\StageTransitionService;
 use GbWeb\EditorialFlow\Service\TaskEventPublisher;
 use GbWeb\EditorialFlow\Service\TaskMemberSynchronizer;
 use GbWeb\EditorialFlow\Service\TaskPublishGate;
+use GbWeb\EditorialFlow\Service\TaskReadAccess;
 use GbWeb\EditorialFlow\Service\TaskSubjectRegistry;
 use GbWeb\EditorialFlow\Service\TaskWorkspaceScope;
 use GbWeb\EditorialFlow\Service\WorkspaceConflictDetector;
@@ -100,6 +101,7 @@ trait BuildsTaskAjaxController
             $logger ?? new NullLogger(),
             $this->get(WorkspaceConflictDetector::class),
             new TaskWorkspaceScope($this->get(Context::class)),
+            new TaskReadAccess(new TaskWorkspaceScope($this->get(Context::class)), $taskRepository),
         );
     }
 }

@@ -278,9 +278,12 @@ widget* if they're not already on yours):
 ![Four Editorial Flow dashboard widgets: My tasks, Recent activity, Recent comments, and Task overview](Images/20-dashboard-widgets.png)
 
 - **My tasks** — everything currently assigned to you, across every page.
-- **Recent activity** — the newest entries from every task's history,
-  board‑wide — a live feed of what's actually happening.
+- **Recent activity** — the newest entries from the history of every task you
+  can see on the board — a live feed of what's actually happening.
 - **Recent comments** — catch up on discussion without opening each ticket.
+
+Both feeds follow the board's rules: they only show tasks on pages you have
+access to, so two editors can see different entries in the same widget.
 - **Task overview** — how much work sits in each column, and (this one
   matters most) how much is still unassigned and up for grabs.
 

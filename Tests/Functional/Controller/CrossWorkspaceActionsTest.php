@@ -15,6 +15,7 @@ use PHPUnit\Framework\Attributes\Test;
 use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use TYPO3\CMS\Core\Context\Context;
+use TYPO3\CMS\Core\Core\SystemEnvironmentBuilder;
 use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Http\ServerRequest;
 use TYPO3\CMS\Core\Localization\LanguageServiceFactory;
@@ -275,6 +276,62 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
         self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()), 'the mounts are restored');
     }
 
+    /**
+     * Core hands a version's history only to a reader sitting in the
+     * version's workspace (RecordHistory::findEventsForRecord()). Read from
+     * Team A, the ticket of Team B's post said "No field changes recorded" -
+     * to the coach who is about to approve it.
+     */
+    #[Test]
+    public function aCoachReadsTheOtherTeamsChangesInTheTicketWithoutSwitching(): void
+    {
+        $taskUid = $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->sitIn(self::TEAM_A);
+
+        $response = $this->subject()->ticketAction($this->ticketRequest($taskUid));
+        $body = (string)$response->getBody();
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertStringContainsString('editorialflow-diff-body', $body);
+        self::assertStringNotContainsString('No field changes recorded', $body);
+        self::assertSame(self::TEAM_A, (int)$GLOBALS['BE_USER']->workspace, 'never switched');
+    }
+
+    /**
+     * The same mounts trap as aCoachActsOnATeamPageOutsideTheCurrentWorkspacesMounts(),
+     * for reading: sitting in Team A, Team B's page is outside the coach's
+     * mounts - but the ticket is theirs to read as a member of Team B.
+     */
+    #[Test]
+    public function aCoachOpensTheTicketOfATeamPageOutsideTheCurrentWorkspacesMounts(): void
+    {
+        $this->getConnectionPool()->getConnectionForTable('pages')
+            ->insert('pages', ['uid' => 3, 'pid' => 1, 'title' => 'Team B', 'doktype' => 1, 'perms_everybody' => 31]);
+        $this->getConnectionPool()->getConnectionForTable('be_groups')
+            ->update('be_groups', ['db_mountpoints' => '2,3'], ['uid' => 50]);
+        $workspaces = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '2'], ['uid' => self::TEAM_A]);
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '3'], ['uid' => self::TEAM_B]);
+
+        $this->setUpBackendUser(self::COACH);
+        $this->sitIn(self::TEAM_B);
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['pages' => [3 => ['title' => 'Team B (draft)']]], []);
+        $dataHandler->process_datamap();
+        self::assertSame([], $dataHandler->errorLog);
+        $taskUid = $this->openTaskUid();
+
+        $this->getConnectionPool()->getConnectionForTable('be_users')
+            ->update('be_users', ['workspace_id' => self::TEAM_A], ['uid' => self::COACH]);
+        $this->setUpBackendUser(self::COACH);
+        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()));
+
+        $response = $this->subject()->ticketAction($this->ticketRequest($taskUid));
+
+        self::assertSame(200, $response->getStatusCode(), (string)$response->getBody());
+        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()), 'the mounts are restored');
+    }
+
     #[Test]
     public function theScopeRestoresTheWorkspaceEvenWhenTheWorkThrows(): void
     {
@@ -441,6 +498,15 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
     private function subject(): TaskAjaxController
     {
         return $this->buildTaskAjaxController();
+    }
+
+    private function ticketRequest(int $taskUid): ServerRequestInterface
+    {
+        // The ticket renders f:translate, which needs the application type the
+        // backend middleware would set.
+        return (new ServerRequest())
+            ->withQueryParams(['task' => $taskUid])
+            ->withAttribute('applicationType', SystemEnvironmentBuilder::REQUESTTYPE_BE);
     }
 
     /**

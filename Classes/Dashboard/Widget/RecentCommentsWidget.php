@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Dashboard\Widget;
 
+use GbWeb\EditorialFlow\Service\TaskReadAccess;
 use TYPO3\CMS\Backend\View\BackendViewFactory;
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
@@ -31,6 +32,7 @@ final readonly class RecentCommentsWidget implements WidgetRendererInterface
         private WidgetConfigurationInterface $configuration,
         private BackendViewFactory $backendViewFactory,
         private ConnectionPool $connectionPool,
+        private TaskReadAccess $taskReadAccess,
         /** @var array{limit?: int} */
         private array $options = [],
     ) {
@@ -75,20 +77,19 @@ final readonly class RecentCommentsWidget implements WidgetRendererInterface
      * the task title needs BackendUtility::getRecordTitle()-equivalent resolution
      * that a plain SQL join cannot give us, and not N+1 queries for N comments.
      *
+     * Only comments on tasks the viewer may read (TaskReadAccess): a widget is
+     * granted per group, and before this it showed every comment on every
+     * task of the installation to anyone it was granted to.
+     *
      * @return list<array<string, mixed>>
      */
     private function findRecent(int $limit): array
     {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('tx_editorialflow_comment');
-        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
-
-        $comments = $queryBuilder
-            ->select('*')
-            ->from('tx_editorialflow_comment')
-            ->orderBy('crdate', 'DESC')
-            ->setMaxResults(max(1, $limit))
-            ->executeQuery()
-            ->fetchAllAssociative();
+        $comments = $this->taskReadAccess->firstReadable(
+            $GLOBALS['BE_USER'],
+            fn (int $offset, int $count): array => $this->fetchComments($offset, $count),
+            $limit,
+        );
 
         if ($comments === []) {
             return [];
@@ -102,6 +103,27 @@ final readonly class RecentCommentsWidget implements WidgetRendererInterface
         }
 
         return $comments;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function fetchComments(int $offset, int $count): array
+    {
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('tx_editorialflow_comment');
+        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+
+        return $queryBuilder
+            ->select('*')
+            ->from('tx_editorialflow_comment')
+            ->orderBy('crdate', 'DESC')
+            // A tie-breaker, so paging through the feed never repeats or skips
+            // comments posted in the same second.
+            ->addOrderBy('uid', 'DESC')
+            ->setFirstResult($offset)
+            ->setMaxResults($count)
+            ->executeQuery()
+            ->fetchAllAssociative();
     }
 
     /**

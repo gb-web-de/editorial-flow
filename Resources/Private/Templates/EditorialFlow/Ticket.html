@@ -351,10 +351,19 @@
             Step-by-step field diffs, rendered by core's DiffUtility via
             EXT:workspaces HistoryService - not diffed by hand. Aggregated across
             every covered record, not just the subject - see
-            WorkspaceIntegrationService::getAggregatedMemberDiffs().
+            WorkspaceIntegrationService::getAggregatedMemberDiffs(). diff.html is
+            that DiffUtility output, escaped chunk by chunk by lolli42/finediff.
+
+            diffsWithheld: the viewer is no member of the task's workspace, and
+            an open task's diffs are its draft (TaskAjaxController::readTaskDetails()).
         </f:comment>
-        <f:if condition="{diffs}">
+        <f:if condition="{diffsWithheld}">
             <f:then>
+                <p class="editorialflow-empty editorialflow-diff-withheld">
+                    The changes are shown to members of this task's workspace only.
+                </p>
+            </f:then>
+            <f:else if="{diffs}">
                 <ul class="editorialflow-diff-list">
                     <f:for each="{diffs}" as="diff">
                         <li class="editorialflow-diff" data-table="{diff.table}" data-uid="{diff.uid}">
@@ -366,7 +375,7 @@
                         </li>
                     </f:for>
                 </ul>
-            </f:then>
+            </f:else>
             <f:else>
                 <p class="editorialflow-empty">
                     No field changes recorded. Note that TYPO3 removes change history

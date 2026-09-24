@@ -433,6 +433,30 @@ targets v14.3.x only, the non-deprecated internal method is the more honest
 trade: no deprecation-log noise in production, and it is what core's own
 controllers use for the same check today.
 
+## Who may read a task, and who may do its bookkeeping
+
+A backend AJAX route admits any logged-in backend user, with or without this module, and
+a dashboard widget anyone it was granted to. Neither knows which page a task is about, so
+every endpoint that is sent a task uid asks for itself (security audit, 2026-09-24):
+
+- **Reading** - the ticket, its JSON details, the two dashboard feeds: `TaskReadAccess`.
+  The board's own rule - whoever may see the task's page (`subject_pid`), with the mounts
+  they sit in or, as a member of the task's workspace, with that workspace's mounts.
+- **The draft itself** - the diffs of an open task, the cells of the version comparison:
+  members of that workspace only, as core hides versions from non-members. A non-member
+  sees that something changed, never to what. A member reads the ticket inside the task's
+  workspace (`TaskWorkspaceScope`), because core only returns a version's history to a
+  reader sitting in it.
+- **Bookkeeping** - "assign me", moving a ticket that has no record yet between the
+  planning columns: the bar the subject sets (`assertMayEdit()` on an existing record;
+  for a planned one, what filing the ticket took), asked in the task's workspace.
+- **Criteria** - ticking one needs read access and membership of the task's workspace,
+  and the criterion must belong to that workspace; removing one is checked against the
+  criterion's own workspace, never the `workspaceUid` the request names.
+
+`TaskAccessControlTest` and `DashboardWidgetsRespectTaskAccessTest` pin all of this with
+non-admin users - an admin passes every check there is and would prove nothing.
+
 ## Select to task, split from task
 
 

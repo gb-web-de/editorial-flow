@@ -399,15 +399,45 @@ final class TemplateRendersTest extends FunctionalTestCase
     }
 
     /**
-     * @param array<string, mixed> $taskOverrides
+     * A non-member reading a task of another workspace gets no diffs - and an
+     * empty list must not claim nothing changed, or blame expired history.
      */
-    private function renderTicket(array $taskOverrides = []): string
+    #[Test]
+    public function withheldChangesAreExplainedAsSuch(): void
+    {
+        $output = $this->renderTicket([], ['diffsWithheld' => true]);
+
+        self::assertStringContainsString('editorialflow-diff-withheld', $output);
+        self::assertStringNotContainsString('30 days', $output);
+    }
+
+    /**
+     * The author reaches the template unescaped (see
+     * WorkspaceIntegrationDiffTest) and is escaped exactly once, here.
+     */
+    #[Test]
+    public function theAuthorOfAChangeIsEscapedExactlyOnce(): void
+    {
+        $output = $this->renderTicket([], ['diffs' => [[
+            'label' => 'Header', 'html' => '<ins>new</ins>', 'table' => 'pages', 'uid' => 2,
+            'record' => 'About us', 'user' => 'O\'Brien & <Co>', 'datetime' => '2026-08-07 10:00',
+        ]]]);
+
+        self::assertStringContainsString('O&#039;Brien &amp; &lt;Co&gt;', $output);
+        self::assertStringNotContainsString('&amp;amp;', $output);
+    }
+
+    /**
+     * @param array<string, mixed> $taskOverrides
+     * @param array<string, mixed> $variables
+     */
+    private function renderTicket(array $taskOverrides = [], array $variables = []): string
     {
         $viewFactory = $this->get(ViewFactoryInterface::class);
         $view = $viewFactory->create(new ViewFactoryData(
             templateRootPaths: ['EXT:editorial_flow/Resources/Private/Templates/'],
         ));
-        $view->assignMultiple([
+        $view->assignMultiple(array_merge([
             'task' => array_merge([
                 'uid' => 1,
                 'state' => 'in_progress',
@@ -427,7 +457,7 @@ final class TemplateRendersTest extends FunctionalTestCase
             'timeline' => [],
             'activities' => [],
             'comments' => [],
-        ]);
+        ], $variables));
 
         return $view->render('EditorialFlow/Ticket');
     }

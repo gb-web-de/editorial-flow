@@ -389,10 +389,16 @@ final class WorkspaceIntegrationService
             foreach ($differences as $difference) {
                 $diffs[] = [
                     'label' => (string)($difference['label'] ?? ''),
-                    // Already-rendered diff markup from core's DiffUtility.
+                    // Already-rendered diff markup from core's DiffUtility, which
+                    // escapes every chunk of both values (lolli42/finediff's
+                    // Html renderer) - safe to output raw, and Ticket.html does.
                     'html' => (string)($difference['html'] ?? ''),
-                    'user' => (string)($entry['user_realName'] ?: $entry['user'] ?? ''),
-                    'datetime' => (string)($entry['datetime'] ?? ''),
+                    // Core hands author and date back HTML-escaped, for its own
+                    // view to output raw. Ticket.html escapes them like every
+                    // other value, so passed on as they came "O'Brien & Co"
+                    // reached the editor as "O&#039;Brien &amp; Co".
+                    'user' => htmlspecialchars_decode((string)($entry['user_realName'] ?: $entry['user'] ?? ''), ENT_QUOTES),
+                    'datetime' => htmlspecialchars_decode((string)($entry['datetime'] ?? ''), ENT_QUOTES),
                 ];
             }
         }
@@ -788,10 +794,18 @@ final class WorkspaceIntegrationService
      * do I need to look" for the common case. Revisit if usage shows it's
      * not enough.
      *
+     * A workspace in $withheldWorkspaceUids keeps its column, and its cells
+     * still say whether it changed a field, but not to what: a draft is its
+     * workspace's business, and core hides versions from non-members too.
+     * isTrueConflict still counts that side - "both sides disagree here" is
+     * what the comparison exists to tell, and the conflict badge that led here
+     * has already named the other workspace.
+     *
      * @param list<int> $workspaceUids at least 2, from WorkspaceConflictDetector
-     * @return list<array{field: string, label: string, liveValue: string, cells: list<array{changed: bool, html: string}>, isTrueConflict: bool}>
+     * @param list<int> $withheldWorkspaceUids workspaces the viewer is no member of
+     * @return list<array{field: string, label: string, liveValue: string, cells: list<array{changed: bool, withheld: bool, html: string}>, isTrueConflict: bool}>
      */
-    public function buildConflictDiff(string $table, int $liveUid, array $workspaceUids): array
+    public function buildConflictDiff(string $table, int $liveUid, array $workspaceUids, array $withheldWorkspaceUids = []): array
     {
         if (!$this->tcaSchemaFactory->has($table)) {
             return [];
@@ -846,16 +860,23 @@ final class WorkspaceIntegrationService
                 $changed = $versionRawValue !== (string)($live[$field] ?? '');
                 if (!$changed) {
                     // This workspace never touched the field - not part of the story.
-                    $cells[] = ['changed' => false, 'html' => ''];
+                    $cells[] = ['changed' => false, 'withheld' => false, 'html' => ''];
                     continue;
                 }
                 $touchedByAnyWorkspace = true;
                 $versionValue = (string)(BackendUtility::getProcessedValue($table, $field, $versionRawValue, 0, true) ?? $versionRawValue);
+                $changedValues[$workspaceUid] = $versionValue;
+                if (in_array($workspaceUid, $withheldWorkspaceUids, true)) {
+                    $cells[] = ['changed' => true, 'withheld' => true, 'html' => ''];
+                    continue;
+                }
                 $cells[] = [
                     'changed' => true,
+                    'withheld' => false,
+                    // Escaped chunk by chunk by DiffUtility (lolli42/finediff),
+                    // which is why ConflictDiff.html may output it raw.
                     'html' => $this->diffUtility->diff(strip_tags($liveValue), strip_tags($versionValue), DiffGranularity::WORD),
                 ];
-                $changedValues[$workspaceUid] = $versionValue;
             }
             if (!$touchedByAnyWorkspace) {
                 continue;

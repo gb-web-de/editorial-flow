@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace GbWeb\EditorialFlow\Dashboard\Widget;
 
+use GbWeb\EditorialFlow\Service\TaskReadAccess;
 use TYPO3\CMS\Backend\View\BackendViewFactory;
 use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\Database\ConnectionPool;
@@ -28,6 +29,7 @@ final readonly class RecentActivityWidget implements WidgetRendererInterface
         private WidgetConfigurationInterface $configuration,
         private BackendViewFactory $backendViewFactory,
         private ConnectionPool $connectionPool,
+        private TaskReadAccess $taskReadAccess,
         /** @var array{limit?: int} */
         private array $options = [],
     ) {
@@ -70,20 +72,19 @@ final readonly class RecentActivityWidget implements WidgetRendererInterface
     }
 
     /**
+     * Only entries of tasks the viewer may read (TaskReadAccess): a widget is
+     * granted per group, and before this it showed every decision on every
+     * task of the installation to anyone it was granted to.
+     *
      * @return list<array<string, mixed>>
      */
     private function findRecent(int $limit): array
     {
-        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('tx_editorialflow_activity');
-        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
-
-        $activities = $queryBuilder
-            ->select('a.*')
-            ->from('tx_editorialflow_activity', 'a')
-            ->orderBy('a.crdate', 'DESC')
-            ->setMaxResults(max(1, $limit))
-            ->executeQuery()
-            ->fetchAllAssociative();
+        $activities = $this->taskReadAccess->firstReadable(
+            $GLOBALS['BE_USER'],
+            fn (int $offset, int $count): array => $this->fetchActivities($offset, $count),
+            $limit,
+        );
 
         if ($activities === []) {
             return [];
@@ -102,6 +103,27 @@ final readonly class RecentActivityWidget implements WidgetRendererInterface
         }
 
         return $activities;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function fetchActivities(int $offset, int $count): array
+    {
+        $queryBuilder = $this->connectionPool->getQueryBuilderForTable('tx_editorialflow_activity');
+        $queryBuilder->getRestrictions()->removeAll()->add(new DeletedRestriction());
+
+        return $queryBuilder
+            ->select('a.*')
+            ->from('tx_editorialflow_activity', 'a')
+            ->orderBy('a.crdate', 'DESC')
+            // A tie-breaker, so paging through the feed never repeats or skips
+            // entries written in the same second.
+            ->addOrderBy('a.uid', 'DESC')
+            ->setFirstResult($offset)
+            ->setMaxResults($count)
+            ->executeQuery()
+            ->fetchAllAssociative();
     }
 
     /**

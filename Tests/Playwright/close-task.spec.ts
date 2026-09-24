@@ -36,7 +36,12 @@ const topModal = (page: Page) => page.locator('typo3-backend-modal').last().getB
 async function openCloseDialogFromKeyboard(page: Page): Promise<boolean> {
   const board = await openBoard(page)
 
-  const cardTitle = board.locator('.editorialflow-card-title').first()
+  // An OPEN task: a closed one sits in Done, and its ticket rightly offers no
+  // Close button - picking the first card of any kind failed on a board whose
+  // only card was a finished one.
+  const cardTitle = board
+    .locator('.editorialflow-card:not([data-editorialflow-state="done"]) .editorialflow-card-title')
+    .first()
   if ((await cardTitle.count()) === 0) {
     return false
   }

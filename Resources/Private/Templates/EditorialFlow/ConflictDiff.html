@@ -55,11 +55,27 @@
                                     so two parallel f:for loops line up without
                                     any dynamic array-key lookup in Fluid.
                                 </f:comment>
+                                <f:comment>
+                                    cell.html is core DiffUtility output, escaped
+                                    chunk by chunk by lolli42/finediff - never a
+                                    raw field value. A withheld cell is a workspace
+                                    the viewer is no member of: it says that the
+                                    field changed, never to what.
+                                </f:comment>
                                 <f:for each="{row.cells}" as="cell">
                                     <td>
                                         <f:if condition="{cell.changed}">
                                             <f:then>
-                                                <f:format.raw>{cell.html}</f:format.raw>
+                                                <f:if condition="{cell.withheld}">
+                                                    <f:then>
+                                                        <span class="editorialflow-conflict-diff-withheld">
+                                                            <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:conflict.diff.withheld" default="Changed - shown to members of this workspace only." />
+                                                        </span>
+                                                    </f:then>
+                                                    <f:else>
+                                                        <f:format.raw>{cell.html}</f:format.raw>
+                                                    </f:else>
+                                                </f:if>
                                             </f:then>
                                             <f:else>
                                                 <span class="editorialflow-conflict-diff-unchanged">—</span>

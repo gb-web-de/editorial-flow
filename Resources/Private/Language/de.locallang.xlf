@@ -707,6 +707,10 @@
                 <source>Invalid record.</source>
                 <target>Ungültiger Datensatz.</target>
             </trans-unit>
+            <trans-unit id="conflict.diff.withheld" xml:space="preserve">
+                <source>Changed - shown to members of this workspace only.</source>
+                <target>Geändert - nur für Mitglieder dieses Workspaces sichtbar.</target>
+            </trans-unit>
             <trans-unit id="widget.group.editorialFlow" xml:space="preserve">
                 <source>Editorial Flow</source>
                 <target>Editorial Flow</target>
