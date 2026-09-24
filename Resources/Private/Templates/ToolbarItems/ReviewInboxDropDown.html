@@ -1,0 +1,55 @@
+<html xmlns:core="http://typo3.org/ns/TYPO3/CMS/Core/ViewHelpers" data-namespace-typo3-fluid="true">
+<f:comment>
+    The count travels in a data attribute so review-inbox.js can set the badge
+    on the toggle, which lives outside this dropdown and is not re-rendered.
+</f:comment>
+<span data-editorialflow-inbox-data data-editorialflow-inbox-count="{count}"></span>
+
+<p class="dropdown-headline"><f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:inbox.title"/></p>
+
+<f:if condition="{entries}">
+    <f:then>
+        <ul class="dropdown-list">
+            <f:for each="{entries}" as="entry">
+                <li class="editorialflow-inbox-entry" data-editorialflow-inbox-task="{entry.uid}">
+                    <div class="dropdown-item-text">
+                        <strong>{entry.title}</strong><br>
+                        <small class="text-body-secondary">
+                            {entry.workspaceTitle} &middot;
+                            <f:if condition="{entry.readyToPublish}">
+                                <f:then><span class="badge badge-success">{entry.stageLabel}</span></f:then>
+                                <f:else>{entry.stageLabel}</f:else>
+                            </f:if>
+                        </small>
+                    </div>
+                    <div class="dropdown-item-text editorialflow-inbox-actions">
+                        <f:if condition="{entry.subjectUid} > 0">
+                            <button type="button" class="btn btn-sm btn-default"
+                                    data-editorialflow-inbox-preview
+                                    data-table="{entry.subjectTable}" data-uid="{entry.subjectUid}">
+                                <core:icon identifier="actions-eye" size="small" />
+                                <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:inbox.preview"/>
+                            </button>
+                        </f:if>
+                        <f:if condition="{entry.canPublish}">
+                            <button type="button" class="btn btn-sm btn-primary"
+                                    data-editorialflow-inbox-publish="{entry.uid}"
+                                    data-title="{entry.title}">
+                                <core:icon identifier="actions-cloud-upload" size="small" />
+                                <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:inbox.publish"/>
+                            </button>
+                        </f:if>
+                        <button type="button" class="btn btn-sm btn-link"
+                                data-editorialflow-inbox-board="{entry.pageUid}">
+                            <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:inbox.board"/>
+                        </button>
+                    </div>
+                </li>
+            </f:for>
+        </ul>
+    </f:then>
+    <f:else>
+        <p class="dropdown-item-text"><f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:inbox.empty"/></p>
+    </f:else>
+</f:if>
+</html>

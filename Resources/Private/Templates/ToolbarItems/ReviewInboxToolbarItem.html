@@ -1,0 +1,8 @@
+<html xmlns:core="http://typo3.org/ns/TYPO3/CMS/Core/ViewHelpers" data-namespace-typo3-fluid="true">
+<f:asset.module identifier="@gb-web/editorial-flow/toolbar/review-inbox.js"/>
+<f:render partial="ToolbarItems/ToolbarItem" arguments="{
+    title: 'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:inbox.title',
+    icon: '{core:icon(identifier: \'actions-approve\', size: \'small\', alternativeMarkupIdentifier: \'inline\')}'
+}" />
+<span class="toolbar-item-badge badge badge-pill badge-warning hidden" data-editorialflow-inbox-badge></span>
+</html>

@@ -226,6 +226,50 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
         self::assertSame(self::TEAM_B, (int)$GLOBALS['BE_USER']->workspace);
     }
 
+    /**
+     * Found on the handball site, not in a fixture: core narrows a user's page
+     * mounts to the CURRENT workspace's mounts at login. A coach logged in
+     * while sitting in Team A (mounted on page 2) has no mount for Team B's
+     * page 3 - so acting on Team B's post from there was refused as "no edit
+     * permission", although it is their own team. The scope computes the
+     * mounts for the task's workspace too.
+     */
+    #[Test]
+    public function aCoachActsOnATeamPageOutsideTheCurrentWorkspacesMounts(): void
+    {
+        $this->getConnectionPool()->getConnectionForTable('pages')
+            ->insert('pages', ['uid' => 3, 'pid' => 1, 'title' => 'Team B', 'doktype' => 1, 'perms_everybody' => 31]);
+        $this->getConnectionPool()->getConnectionForTable('be_groups')
+            ->update('be_groups', ['db_mountpoints' => '2,3'], ['uid' => 50]);
+        $workspaces = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '2'], ['uid' => self::TEAM_A]);
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '3'], ['uid' => self::TEAM_B]);
+
+        // Draft on Team B's page, written from inside Team B.
+        $this->setUpBackendUser(self::COACH);
+        $this->sitIn(self::TEAM_B);
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['pages' => [3 => ['title' => 'Team B (draft)']]], []);
+        $dataHandler->process_datamap();
+        self::assertSame([], $dataHandler->errorLog);
+        $taskUid = $this->openTaskUid();
+
+        // Log in again sitting in Team A: mounts are computed for Team A now.
+        $this->getConnectionPool()->getConnectionForTable('be_users')
+            ->update('be_users', ['workspace_id' => self::TEAM_A], ['uid' => self::COACH]);
+        $this->setUpBackendUser(self::COACH);
+        self::assertSame(self::TEAM_A, (int)$GLOBALS['BE_USER']->workspace);
+        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()));
+
+        $payload = $this->decode($this->subject()->executeStageAction($this->post([
+            'task' => $taskUid,
+            'stageUid' => StagesService::STAGE_PUBLISH_ID,
+        ])));
+
+        self::assertTrue($payload['success'], (string)($payload['message'] ?? ''));
+        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()), 'the mounts are restored');
+    }
+
     #[Test]
     public function theScopeRestoresTheWorkspaceEvenWhenTheWorkThrows(): void
     {
