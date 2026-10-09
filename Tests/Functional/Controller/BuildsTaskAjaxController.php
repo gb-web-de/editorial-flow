@@ -13,6 +13,7 @@ use GbWeb\EditorialFlow\Service\ActiveTaskSession;
 use GbWeb\EditorialFlow\Service\ActivityLogger;
 use GbWeb\EditorialFlow\Service\PendingPageHandoff;
 use GbWeb\EditorialFlow\Service\PendingSubjectHandoff;
+use GbWeb\EditorialFlow\Service\PreviewLinkBuilder;
 use GbWeb\EditorialFlow\Service\RecordCreationTargetProvider;
 use GbWeb\EditorialFlow\Service\ReferenceInspector;
 use GbWeb\EditorialFlow\Service\StageTransitionService;
@@ -36,6 +37,7 @@ use TYPO3\CMS\Core\View\ViewFactoryInterface;
 use TYPO3\CMS\Workspaces\Authorization\WorkspacePublishGate;
 use TYPO3\CMS\Workspaces\Domain\Repository\WorkspaceRepository;
 use TYPO3\CMS\Workspaces\Domain\Repository\WorkspaceStageRepository;
+use TYPO3\CMS\Workspaces\Preview\PreviewUriBuilder;
 use TYPO3\CMS\Workspaces\Service\HistoryService;
 use TYPO3\CMS\Workspaces\Service\StagesService;
 
@@ -102,6 +104,7 @@ trait BuildsTaskAjaxController
             $this->get(WorkspaceConflictDetector::class),
             new TaskWorkspaceScope($this->get(Context::class)),
             new TaskReadAccess(new TaskWorkspaceScope($this->get(Context::class)), $taskRepository),
+            new PreviewLinkBuilder($this->get(PreviewUriBuilder::class), $this->get(TcaSchemaFactory::class), $connectionPool),
         );
     }
 }

@@ -28,6 +28,21 @@
                 <core:icon identifier="actions-open" size="small" /> Edit record
             </a>
             <f:comment>
+                The Workspaces module's "Generate page preview links", for this
+                task's subject: links and a QR code that show the draft without
+                a backend login - to a phone, or to someone who has no account.
+                Members of the task's workspace only (canSharePreview, see
+                TaskAjaxController::previewLinkAction()), and only while there
+                is a draft to show.
+            </f:comment>
+            <f:if condition="{canSharePreview} && !{nothingPending} && {subject.uid} > 0">
+                <button type="button" class="btn btn-default btn-sm"
+                        data-editorialflow-preview-link="{task.uid}" data-title="{subject.title}">
+                    <core:icon identifier="actions-version-workspaces-preview-link" size="small" />
+                    <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.trigger" default="Preview link" />
+                </button>
+            </f:if>
+            <f:comment>
                 The only place closing is offered from.
 
                 It was on the board card too, next to Publish, which put three
@@ -205,6 +220,24 @@
                                                 data-title="{member.title}">
                                             <core:icon identifier="actions-arrow-right-alt" size="small" />
                                             <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:membership.move.button" default="Move to task" />
+                                        </button>
+                                    </f:if>
+                                    <f:comment>
+                                        The QR code the Workspaces module shows on
+                                        each of its rows: this one record's draft,
+                                        shareable without a login. Built in the
+                                        task's workspace, so - unlike Preview and
+                                        Discard below - offered whichever
+                                        workspace the member sits in.
+                                    </f:comment>
+                                    <f:if condition="{member.hasPendingVersion} && {canSharePreview}">
+                                        <button type="button" class="btn btn-xs btn-default"
+                                                data-editorialflow-preview-link="{task.uid}"
+                                                data-table="{member.record_table}" data-uid="{member.record_uid}"
+                                                data-title="{member.title}"
+                                                title="{f:translate(key: 'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.member.title', default: 'Preview link and QR code, usable without a login')}">
+                                            <core:icon identifier="actions-qrcode" size="small" />
+                                            <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.member" default="QR code" />
                                         </button>
                                     </f:if>
                                     <f:if condition="{member.hasPendingVersion}">

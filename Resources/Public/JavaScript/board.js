@@ -33,6 +33,7 @@ import { registerCreateButton } from '@gb-web/editorial-flow/task/create-wizard.
 import { registerCommentForm } from '@gb-web/editorial-flow/task/comment.js';
 import { registerPublishButtons } from '@gb-web/editorial-flow/task/publish.js';
 import { registerMemberActions } from '@gb-web/editorial-flow/task/member-actions.js';
+import { registerPreviewLinks } from '@gb-web/editorial-flow/task/preview-link.js';
 import { registerMembershipActions } from '@gb-web/editorial-flow/task/membership.js';
 import { registerConflictDiffButtons } from '@gb-web/editorial-flow/task/conflict-diff.js';
 import { registerCloseActions, openCloseDialog } from '@gb-web/editorial-flow/task/close.js';
@@ -81,6 +82,8 @@ class EditorialFlowBoard {
     // Delegated from the document: the ticket form arrives with the modal.
     registerCommentForm();
     registerMemberActions();
+    // Same delegation: "Preview link" and the QR code are ticket buttons.
+    registerPreviewLinks();
     // Same reasoning, and the same delegation: the split/move buttons appear in
     // the ticket's member list and on the page module's element badge.
     registerMembershipActions();

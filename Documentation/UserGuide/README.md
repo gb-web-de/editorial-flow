@@ -141,6 +141,13 @@ This is where a card becomes a **file**, not just a label:
   with **Preview** (open the pending version on the live site, without
   publishing) and **Discard** (throw away just that one change, keeping the
   rest of the task intact).
+- **Preview link** (in the ticket header) and **QR code** (on each covered
+  record with a pending change) — the same shareable links the Workspaces
+  module offers. They show the draft **without a backend login**, so you can
+  check it on your phone or send it to someone without an account. Anyone
+  holding the link can see the unpublished changes until it expires — the
+  dialog says when (48 hours unless the workspace sets otherwise). Offered
+  to members of the task's workspace only.
 - **"reused elsewhere"** — a record referenced from more than one page.
   Discarding or publishing it affects every page that uses it, so this
   warning is there before you act, not after.
@@ -335,6 +342,7 @@ Two things worth knowing as an editor:
 | Assign to me | Board card, page banner | One click, for unassigned tasks |
 | Comment | Ticket, VE comment popover | Attached permanently to the task's history |
 | Preview a pending change | Ticket → *Preview* | Opens the live site with just that version overlaid |
+| Share a draft without a login | Ticket → *Preview link* / *QR code* | Link + QR code to the unpublished version, valid until it expires |
 | Discard one record | Ticket → *Discard* | Throws away that one change, keeps the rest of the task |
 | See what changed | Ticket → *Diff* | Word-level before/after |
 | Publish | Board card (owner only) | Irreversible, goes live immediately, closes the task |

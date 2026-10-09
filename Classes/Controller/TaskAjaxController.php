@@ -15,6 +15,7 @@ use GbWeb\EditorialFlow\Service\ActiveTaskSession;
 use GbWeb\EditorialFlow\Service\ActivityLogger;
 use GbWeb\EditorialFlow\Service\PendingPageHandoff;
 use GbWeb\EditorialFlow\Service\PendingSubjectHandoff;
+use GbWeb\EditorialFlow\Service\PreviewLinkBuilder;
 use GbWeb\EditorialFlow\Service\RecordCreationTargetProvider;
 use GbWeb\EditorialFlow\Service\ReferenceInspector;
 use GbWeb\EditorialFlow\Service\StageTransitionService;
@@ -75,6 +76,7 @@ final class TaskAjaxController
         private readonly WorkspaceConflictDetector $conflictDetector,
         private readonly TaskWorkspaceScope $workspaceScope,
         private readonly TaskReadAccess $taskReadAccess,
+        private readonly PreviewLinkBuilder $previewLinkBuilder,
     ) {
     }
 
@@ -649,6 +651,88 @@ final class TaskAjaxController
         }
 
         return new JsonResponse(['success' => true, 'url' => $url]);
+    }
+
+    /**
+     * "Preview link": the shareable links and QR code the Workspaces module
+     * offers - "Generate page preview links", and the QR code on each of its
+     * rows - for a task. Its subject when no record is named, else one record
+     * the task covers.
+     *
+     * Not previewMemberAction()'s link: that one opens the backend's own
+     * preview and needs a login. These work on any device, for whoever holds
+     * them - which is the point (a phone, a colleague without an account),
+     * and why they are for members of the task's workspace only. The ticket
+     * withholds an open task's draft from everyone else (readTaskDetails()),
+     * and a link that hands the draft to anyone must not be easier to get
+     * than the diff. inTaskWorkspace() enforces the membership; the record
+     * then has to be readable for the user, as for any look at its content.
+     *
+     * Built on request rather than with the ticket: every link is a
+     * sys_preview row, and a ticket is opened far more often than a draft is
+     * shared.
+     */
+    public function previewLinkAction(ServerRequestInterface $request): ResponseInterface
+    {
+        $body = $this->getBody($request);
+        $task = $this->findOpenTaskOrError((int)($body['task'] ?? 0), 'share a preview of it');
+        if ($task instanceof ResponseInterface) {
+            return $task;
+        }
+        $taskUid = (int)$task['uid'];
+        if ((int)$task['workspace_uid'] < 1) {
+            return $this->reject(
+                'no-pending-versions',
+                'Nothing of this task has been edited in a workspace yet, so there is no draft to preview.',
+                ['taskUid' => $taskUid],
+            );
+        }
+
+        $table = (string)($body['table'] ?? '');
+        $uid = (int)($body['uid'] ?? 0);
+        if ($table === '') {
+            $table = (string)$task['subject_table'];
+            $uid = (int)$task['subject_uid'];
+        } elseif ((int)($this->taskRepository->findOpenTaskByMember($table, $uid)['uid'] ?? 0) !== $taskUid) {
+            return $this->reject(
+                'record-not-in-task',
+                'That record is not covered by this task.',
+                ['taskUid' => $taskUid, 'table' => $table, 'uid' => $uid],
+            );
+        }
+        if ($uid < 1) {
+            return $this->reject(
+                'preview-unavailable',
+                'What this task is about does not exist yet, so there is nothing to preview.',
+                ['taskUid' => $taskUid, 'table' => $table],
+            );
+        }
+
+        $requestHost = (string)$request->getAttribute('normalizedParams')?->getRequestHost();
+        $links = $this->inTaskWorkspace(
+            $task,
+            fn (): TaskActionError|array => $this->assertMayReadRecord($table, $uid)
+                ?? $this->previewLinkBuilder->build($this->getBackendUser(), $table, $uid, $requestHost),
+        );
+        if ($links instanceof ResponseInterface) {
+            return $links;
+        }
+        if ($links instanceof TaskActionError) {
+            return $this->error($links);
+        }
+        if ($links === []) {
+            return $this->reject(
+                'preview-unavailable',
+                'Could not build a preview link for that record.',
+                ['taskUid' => $taskUid, 'table' => $table, 'uid' => $uid],
+            );
+        }
+
+        return new JsonResponse([
+            'success' => true,
+            'links' => $links,
+            'expires' => $this->previewLinkBuilder->expiryOf($links[0]['url']),
+        ]);
     }
 
     /**
@@ -2929,6 +3013,11 @@ final class TaskAjaxController
             // the one I'm currently in" apart from "not versioned yet" - Preview/
             // Discard/Comment only make sense once those two match.
             'activeWorkspaceUid' => (int)$this->getBackendUser()->workspace,
+            // Whether to offer the shareable preview link (previewLinkAction()):
+            // to members of the task's workspace, whichever one they sit in,
+            // while the task is open.
+            'canSharePreview' => (int)$details['task']['closed'] === 0
+                && $this->workspaceScope->canEnter($this->getBackendUser(), (int)$details['task']['workspace_uid']),
         ]);
 
         return new HtmlResponse($view->render('EditorialFlow/Ticket'));

@@ -61,6 +61,12 @@ return [
         'path' => '/editorialflow/task/preview-member',
         'target' => TaskAjaxController::class . '::previewMemberAction',
     ],
+    // "Preview link": shareable ADMCMD_prev links and their QR code for a
+    // task's draft, as the Workspaces module offers them - no login needed.
+    'editorialflow_task_preview_link' => [
+        'path' => '/editorialflow/task/preview-link',
+        'target' => TaskAjaxController::class . '::previewLinkAction',
+    ],
     // Throw away one member's pending version, keeping its task membership.
     'editorialflow_task_discard_member' => [
         'path' => '/editorialflow/task/discard-member',

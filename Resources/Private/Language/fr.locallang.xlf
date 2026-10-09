@@ -944,6 +944,46 @@
                 <source>No preview available for this entry.</source>
                 <target>Aucun aperçu disponible.</target>
             </trans-unit>
+            <trans-unit id="previewLink.trigger" xml:space="preserve">
+                <source>Preview link</source>
+                <target>Lien d’aperçu</target>
+            </trans-unit>
+            <trans-unit id="previewLink.member" xml:space="preserve">
+                <source>QR code</source>
+                <target>QR code</target>
+            </trans-unit>
+            <trans-unit id="previewLink.member.title" xml:space="preserve">
+                <source>Preview link and QR code, usable without a login</source>
+                <target>Lien d’aperçu et QR code, utilisables sans connexion</target>
+            </trans-unit>
+            <trans-unit id="previewLink.dialog.title" xml:space="preserve">
+                <source>Preview link: %s</source>
+                <target>Lien d’aperçu : %s</target>
+            </trans-unit>
+            <trans-unit id="previewLink.notice" xml:space="preserve">
+                <source>Anyone with this link can see the unpublished changes, without logging in.</source>
+                <target>Toute personne disposant de ce lien voit les modifications non publiées, sans se connecter.</target>
+            </trans-unit>
+            <trans-unit id="previewLink.notice.until" xml:space="preserve">
+                <source>Anyone with this link can see the unpublished changes, without logging in, until %s.</source>
+                <target>Toute personne disposant de ce lien voit les modifications non publiées, sans se connecter, jusqu’au %s.</target>
+            </trans-unit>
+            <trans-unit id="previewLink.language" xml:space="preserve">
+                <source>Language</source>
+                <target>Langue</target>
+            </trans-unit>
+            <trans-unit id="previewLink.open" xml:space="preserve">
+                <source>Open preview</source>
+                <target>Ouvrir l’aperçu</target>
+            </trans-unit>
+            <trans-unit id="previewLink.close" xml:space="preserve">
+                <source>Close</source>
+                <target>Fermer</target>
+            </trans-unit>
+            <trans-unit id="previewLink.error" xml:space="preserve">
+                <source>Could not create a preview link.</source>
+                <target>Impossible de créer le lien d’aperçu.</target>
+            </trans-unit>
         </body>
     </file>
 </xliff>

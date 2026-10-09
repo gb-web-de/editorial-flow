@@ -1,0 +1,16 @@
+{
+    "mcpServers": {
+        "typo3-dev-companion": {
+            "type": "stdio",
+            "command": "php",
+            "args": [
+                "/home/gordon/Projekte/typo3-dev-companion/bin/typo3-dev-companion"
+            ]
+        },
+        "typo3-security": {
+            "command": "node",
+            "args": ["/home/gordon/Projekte/ai_tools/typo3-mcp-server/build/index.js"]
+        }
+    }
+}
+

@@ -787,6 +787,36 @@
             <trans-unit id="inbox.previewError" xml:space="preserve">
                 <source>No preview available for this entry.</source>
             </trans-unit>
+            <trans-unit id="previewLink.trigger" xml:space="preserve">
+                <source>Preview link</source>
+            </trans-unit>
+            <trans-unit id="previewLink.member" xml:space="preserve">
+                <source>QR code</source>
+            </trans-unit>
+            <trans-unit id="previewLink.member.title" xml:space="preserve">
+                <source>Preview link and QR code, usable without a login</source>
+            </trans-unit>
+            <trans-unit id="previewLink.dialog.title" xml:space="preserve">
+                <source>Preview link: %s</source>
+            </trans-unit>
+            <trans-unit id="previewLink.notice" xml:space="preserve">
+                <source>Anyone with this link can see the unpublished changes, without logging in.</source>
+            </trans-unit>
+            <trans-unit id="previewLink.notice.until" xml:space="preserve">
+                <source>Anyone with this link can see the unpublished changes, without logging in, until %s.</source>
+            </trans-unit>
+            <trans-unit id="previewLink.language" xml:space="preserve">
+                <source>Language</source>
+            </trans-unit>
+            <trans-unit id="previewLink.open" xml:space="preserve">
+                <source>Open preview</source>
+            </trans-unit>
+            <trans-unit id="previewLink.close" xml:space="preserve">
+                <source>Close</source>
+            </trans-unit>
+            <trans-unit id="previewLink.error" xml:space="preserve">
+                <source>Could not create a preview link.</source>
+            </trans-unit>
         </body>
     </file>
 </xliff>

@@ -18,6 +18,8 @@ export default defineConfig({
       '@typo3/backend/modal.js': `${doubles}/modal.js`,
       '@typo3/backend/enum/severity.js': `${doubles}/severity.js`,
       '~labels/editorial_flow.messages': `${doubles}/labels.js`,
+      '@typo3/backend/utility/top-level-module-import.js': `${doubles}/top-level-module-import.js`,
+      '@typo3/backend/element/qrcode-element.js': `${doubles}/qrcode-element.js`,
       // The picker is a LitElement imported purely for its custom-element
       // registration; standing it in keeps lit out of the test environment.
       '@gb-web/editorial-flow/components/assignee-picker.js': `${doubles}/assignee-picker.js`,
