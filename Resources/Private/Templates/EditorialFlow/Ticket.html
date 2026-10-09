@@ -31,11 +31,11 @@
                 The Workspaces module's "Generate page preview links", for this
                 task's subject: links and a QR code that show the draft without
                 a backend login - to a phone, or to someone who has no account.
-                Members of the task's workspace only (canSharePreview, see
+                Members of the task's workspace only (canActInTaskWorkspace, see
                 TaskAjaxController::previewLinkAction()), and only while there
                 is a draft to show.
             </f:comment>
-            <f:if condition="{canSharePreview} && !{nothingPending} && {subject.uid} > 0">
+            <f:if condition="{canActInTaskWorkspace} && !{nothingPending} && {subject.uid} > 0">
                 <button type="button" class="btn btn-default btn-sm"
                         data-editorialflow-preview-link="{task.uid}" data-title="{subject.title}">
                     <core:icon identifier="actions-version-workspaces-preview-link" size="small" />
@@ -223,31 +223,30 @@
                                         </button>
                                     </f:if>
                                     <f:comment>
-                                        The QR code the Workspaces module shows on
-                                        each of its rows: this one record's draft,
-                                        shareable without a login. Built in the
-                                        task's workspace, so - unlike Preview and
-                                        Discard below - offered whichever
-                                        workspace the member sits in.
+                                        All three run in the task's workspace
+                                        (TaskAjaxController::previewLinkAction(),
+                                        ::previewMemberAction(),
+                                        ::discardMemberAction()), so they are
+                                        offered to its members whichever workspace
+                                        they sit in - canActInTaskWorkspace. A
+                                        pending version implies the task has a
+                                        workspace; Live is never one.
+
+                                        The QR code is the one the Workspaces
+                                        module shows on each of its rows: this one
+                                        record's draft, shareable without a login.
                                     </f:comment>
-                                    <f:if condition="{member.hasPendingVersion} && {canSharePreview}">
-                                        <button type="button" class="btn btn-xs btn-default"
-                                                data-editorialflow-preview-link="{task.uid}"
-                                                data-table="{member.record_table}" data-uid="{member.record_uid}"
-                                                data-title="{member.title}"
-                                                title="{f:translate(key: 'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.member.title', default: 'Preview link and QR code, usable without a login')}">
-                                            <core:icon identifier="actions-qrcode" size="small" />
-                                            <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.member" default="QR code" />
-                                        </button>
-                                    </f:if>
                                     <f:if condition="{member.hasPendingVersion}">
-                                        <f:if condition="{task.workspace_uid} > 0 && {task.workspace_uid} != {activeWorkspaceUid}">
+                                        <f:if condition="{canActInTaskWorkspace}">
                                             <f:then>
-                                                <span class="editorialflow-foreign-notice" title="This task belongs to another workspace">
-                                                    Switch to that workspace to act on this
-                                                </span>
-                                            </f:then>
-                                            <f:else>
+                                                <button type="button" class="btn btn-xs btn-default"
+                                                        data-editorialflow-preview-link="{task.uid}"
+                                                        data-table="{member.record_table}" data-uid="{member.record_uid}"
+                                                        data-title="{member.title}"
+                                                        title="{f:translate(key: 'LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.member.title', default: 'Preview link and QR code, usable without a login')}">
+                                                    <core:icon identifier="actions-qrcode" size="small" />
+                                                    <f:translate key="LLL:EXT:editorial_flow/Resources/Private/Language/locallang.xlf:previewLink.member" default="QR code" />
+                                                </button>
                                                 <button type="button" class="btn btn-xs btn-default editorialflow-member-preview"
                                                         data-table="{member.record_table}" data-uid="{member.record_uid}">
                                                     <core:icon identifier="actions-eye" size="small" /> Preview
@@ -256,6 +255,11 @@
                                                         data-table="{member.record_table}" data-uid="{member.record_uid}" data-title="{member.title}">
                                                     <core:icon identifier="actions-delete" size="small" /> Discard
                                                 </button>
+                                            </f:then>
+                                            <f:else if="!{task.closed}">
+                                                <span class="editorialflow-foreign-notice" title="This task belongs to a workspace you are not a member of">
+                                                    Only members of this task's workspace can act on this
+                                                </span>
                                             </f:else>
                                         </f:if>
                                     </f:if>
@@ -423,17 +427,19 @@
         <f:comment>
             Only shown while the task is open. A closed task is an archive record,
             and the server refuses comments on it - the UI should not offer what the
-            server will reject.
+            server will reject. The same goes for a task in a workspace the user is
+            no member of: commentAction() asks in the task's workspace, for its
+            members only. A task without a workspace yet has no such bar.
         </f:comment>
         <f:if condition="{task.closed}">
             <f:then>
                 <p class="editorialflow-empty">This task is closed. Its history is kept as it was.</p>
             </f:then>
             <f:else>
-                <f:if condition="{task.workspace_uid} > 0 && {task.workspace_uid} != {activeWorkspaceUid}">
+                <f:if condition="{task.workspace_uid} > 0 && !{canActInTaskWorkspace}">
                     <f:then>
                         <p class="editorialflow-empty">
-                            This task belongs to another workspace. Switch to that workspace to comment on it.
+                            Only members of this task's workspace can comment on it.
                         </p>
                     </f:then>
                     <f:else>

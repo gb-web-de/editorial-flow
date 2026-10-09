@@ -236,8 +236,9 @@ final class TaskAjaxController
         // at all is a property of that task, not of any record handed to it. A
         // pending version lives in the editor's workspace, so moving it onto a
         // task bound to a different one would leave its changes unreachable -
-        // the ticket could only offer "switch to that workspace to act on
-        // this". Same rule openTasksForContext() applies when it offers tasks.
+        // preview, discard, stage change and publish all look for versions in
+        // the task's workspace, and would find none of them there. Same rule
+        // openTasksForContext() applies when it offers tasks.
         $workspaceUid = (int)$this->getBackendUser()->workspace;
         $taskWorkspaceUid = (int)($task['workspace_uid'] ?? 0);
         if ($taskWorkspaceUid !== 0 && $taskWorkspaceUid !== $workspaceUid) {
@@ -3009,14 +3010,11 @@ final class TaskAjaxController
                 'edit' => [$subjectTable => [$subjectUid => 'edit']],
                 'returnUrl' => (string)$this->uriBuilder->buildUriFromRoute('web_editorialflow', ['id' => (int)$details['task']['subject_pid']]),
             ]),
-            // Lets Ticket.html tell "this task belongs to another workspace than
-            // the one I'm currently in" apart from "not versioned yet" - Preview/
-            // Discard/Comment only make sense once those two match.
-            'activeWorkspaceUid' => (int)$this->getBackendUser()->workspace,
-            // Whether to offer the shareable preview link (previewLinkAction()):
-            // to members of the task's workspace, whichever one they sit in,
-            // while the task is open.
-            'canSharePreview' => (int)$details['task']['closed'] === 0
+            // Whether to offer Preview, Discard, the shareable preview link
+            // (previewLinkAction()) and the comment form: all of them run in the
+            // task's own workspace (inTaskWorkspace()), so to its members,
+            // whichever workspace they sit in, while the task is open.
+            'canActInTaskWorkspace' => (int)$details['task']['closed'] === 0
                 && $this->workspaceScope->canEnter($this->getBackendUser(), (int)$details['task']['workspace_uid']),
         ]);
 
@@ -3147,8 +3145,16 @@ final class TaskAjaxController
         }
 
         // Commenting is a write on the subject, so it needs the same permission
-        // as any other change to it - never merely "is logged in".
-        $error = $this->assertMayEdit((string)$task['subject_table'], (int)$task['subject_uid']);
+        // as any other change to it - never merely "is logged in". Asked in the
+        // task's workspace, like every other action on it: with the mounts of
+        // the workspace the user sits in, a coach's own team page elsewhere was
+        // refused. And only for its members - the talk about a draft is as much
+        // the workspace's business as the draft itself (readTaskDetails()).
+        $check = fn (): ?TaskActionError => $this->assertMayEdit((string)$task['subject_table'], (int)$task['subject_uid']);
+        $error = (int)$task['workspace_uid'] > 0 ? $this->inTaskWorkspace($task, $check) : $check();
+        if ($error instanceof ResponseInterface) {
+            return $error;
+        }
         if ($error !== null) {
             return $this->error($error);
         }
