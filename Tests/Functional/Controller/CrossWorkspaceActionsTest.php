@@ -16,6 +16,7 @@ use Psr\Http\Message\ResponseInterface;
 use Psr\Http\Message\ServerRequestInterface;
 use TYPO3\CMS\Core\Context\Context;
 use TYPO3\CMS\Core\Core\SystemEnvironmentBuilder;
+use TYPO3\CMS\Core\Database\Connection;
 use TYPO3\CMS\Core\DataHandling\DataHandler;
 use TYPO3\CMS\Core\Http\ServerRequest;
 use TYPO3\CMS\Core\Localization\LanguageServiceFactory;
@@ -243,29 +244,7 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
     #[Test]
     public function aCoachActsOnATeamPageOutsideTheCurrentWorkspacesMounts(): void
     {
-        $this->getConnectionPool()->getConnectionForTable('pages')
-            ->insert('pages', ['uid' => 3, 'pid' => 1, 'title' => 'Team B', 'doktype' => 1, 'perms_everybody' => 31]);
-        $this->getConnectionPool()->getConnectionForTable('be_groups')
-            ->update('be_groups', ['db_mountpoints' => '2,3'], ['uid' => 50]);
-        $workspaces = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
-        $workspaces->update('sys_workspace', ['db_mountpoints' => '2'], ['uid' => self::TEAM_A]);
-        $workspaces->update('sys_workspace', ['db_mountpoints' => '3'], ['uid' => self::TEAM_B]);
-
-        // Draft on Team B's page, written from inside Team B.
-        $this->setUpBackendUser(self::COACH);
-        $this->sitIn(self::TEAM_B);
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start(['pages' => [3 => ['title' => 'Team B (draft)']]], []);
-        $dataHandler->process_datamap();
-        self::assertSame([], $dataHandler->errorLog);
-        $taskUid = $this->openTaskUid();
-
-        // Log in again sitting in Team A: mounts are computed for Team A now.
-        $this->getConnectionPool()->getConnectionForTable('be_users')
-            ->update('be_users', ['workspace_id' => self::TEAM_A], ['uid' => self::COACH]);
-        $this->setUpBackendUser(self::COACH);
-        self::assertSame(self::TEAM_A, (int)$GLOBALS['BE_USER']->workspace);
-        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()));
+        $taskUid = $this->taskOnTeamBsPageLoggedInToTeamA();
 
         $payload = $this->decode($this->subject()->executeStageAction($this->post([
             'task' => $taskUid,
@@ -305,31 +284,88 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
     #[Test]
     public function aCoachOpensTheTicketOfATeamPageOutsideTheCurrentWorkspacesMounts(): void
     {
-        $this->getConnectionPool()->getConnectionForTable('pages')
-            ->insert('pages', ['uid' => 3, 'pid' => 1, 'title' => 'Team B', 'doktype' => 1, 'perms_everybody' => 31]);
-        $this->getConnectionPool()->getConnectionForTable('be_groups')
-            ->update('be_groups', ['db_mountpoints' => '2,3'], ['uid' => 50]);
-        $workspaces = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
-        $workspaces->update('sys_workspace', ['db_mountpoints' => '2'], ['uid' => self::TEAM_A]);
-        $workspaces->update('sys_workspace', ['db_mountpoints' => '3'], ['uid' => self::TEAM_B]);
-
-        $this->setUpBackendUser(self::COACH);
-        $this->sitIn(self::TEAM_B);
-        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
-        $dataHandler->start(['pages' => [3 => ['title' => 'Team B (draft)']]], []);
-        $dataHandler->process_datamap();
-        self::assertSame([], $dataHandler->errorLog);
-        $taskUid = $this->openTaskUid();
-
-        $this->getConnectionPool()->getConnectionForTable('be_users')
-            ->update('be_users', ['workspace_id' => self::TEAM_A], ['uid' => self::COACH]);
-        $this->setUpBackendUser(self::COACH);
-        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()));
+        $taskUid = $this->taskOnTeamBsPageLoggedInToTeamA();
 
         $response = $this->subject()->ticketAction($this->ticketRequest($taskUid));
 
         self::assertSame(200, $response->getStatusCode(), (string)$response->getBody());
         self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()), 'the mounts are restored');
+    }
+
+    /**
+     * The ticket offers what the endpoints do: Preview and Discard run in the
+     * task's workspace (previewMemberAction(), discardMemberAction()), and so
+     * does commenting. It still told the coach "Switch to that workspace to
+     * act on this", gated on the workspace selected in the header.
+     */
+    #[Test]
+    public function theTicketOffersPreviewDiscardAndCommentToACoachSittingInTheOtherTeam(): void
+    {
+        $taskUid = $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->sitIn(self::TEAM_A);
+
+        $body = (string)$this->subject()->ticketAction($this->ticketRequest($taskUid))->getBody();
+
+        self::assertStringContainsString('editorialflow-member-preview', $body);
+        self::assertStringContainsString('editorialflow-member-discard', $body);
+        self::assertStringContainsString('data-editorialflow-comment-form', $body);
+        self::assertStringNotContainsString('members of this task\'s workspace', $body);
+    }
+
+    #[Test]
+    public function theTicketOffersNoneOfItToSomeoneWhoIsNoMemberOfTheTasksWorkspace(): void
+    {
+        $taskUid = $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->getConnectionPool()->getConnectionForTable('sys_workspace')
+            ->update('sys_workspace', ['adminusers' => ''], ['uid' => self::TEAM_B]);
+        $this->setUpBackendUser(self::COACH);
+        $this->sitIn(self::TEAM_A);
+
+        $response = $this->subject()->ticketAction($this->ticketRequest($taskUid));
+        $body = (string)$response->getBody();
+
+        self::assertSame(200, $response->getStatusCode(), 'the page is in their tree, so the ticket is theirs to read');
+        self::assertStringNotContainsString('editorialflow-member-preview', $body);
+        self::assertStringNotContainsString('editorialflow-member-discard', $body);
+        self::assertStringNotContainsString('data-editorialflow-comment-form', $body);
+        self::assertStringContainsString('Only members of this task\'s workspace can act on this', $body);
+        self::assertStringContainsString('Only members of this task\'s workspace can comment on it', $body);
+    }
+
+    /**
+     * Commenting needs edit permission on the subject, which depends on the
+     * page mounts - asked with Team A's, the coach's own Team B page was out
+     * of reach, and the comment form the ticket offers was refused.
+     */
+    #[Test]
+    public function aCoachCommentsOnATeamPageOutsideTheCurrentWorkspacesMounts(): void
+    {
+        $taskUid = $this->taskOnTeamBsPageLoggedInToTeamA();
+
+        $payload = $this->decode($this->subject()->commentAction($this->post([
+            'task' => $taskUid,
+            'content' => 'Score checked, good to go.',
+        ])));
+
+        self::assertTrue($payload['success'], (string)($payload['message'] ?? ''));
+        self::assertSame(1, $this->commentCount($taskUid));
+        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()), 'the mounts are restored');
+    }
+
+    #[Test]
+    public function someoneWhoIsNoMemberOfTheTasksWorkspaceCannotCommentOnIt(): void
+    {
+        $taskUid = $this->draftInWorkspace(self::TEAM_B, 'About us (Team B draft)');
+        $this->getConnectionPool()->getConnectionForTable('sys_workspace')
+            ->update('sys_workspace', ['adminusers' => ''], ['uid' => self::TEAM_B]);
+        $this->setUpBackendUser(self::COACH);
+        $this->sitIn(self::TEAM_A);
+
+        $response = $this->subject()->commentAction($this->post(['task' => $taskUid, 'content' => 'Looks fine to me.']));
+
+        self::assertSame(400, $response->getStatusCode());
+        self::assertSame('no-workspace-access', $this->decode($response)['code']);
+        self::assertSame(0, $this->commentCount($taskUid));
     }
 
     #[Test]
@@ -435,6 +471,40 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
         return $this->openTaskUid();
     }
 
+    /**
+     * A coach mounted on both team pages (2 for Team A, 3 for Team B) drafts
+     * on Team B's page from inside Team B, then logs in again sitting in
+     * Team A - so core computes their mounts for Team A only, without page 3.
+     *
+     * @return int the task of the Team B draft
+     */
+    private function taskOnTeamBsPageLoggedInToTeamA(): int
+    {
+        $this->getConnectionPool()->getConnectionForTable('pages')
+            ->insert('pages', ['uid' => 3, 'pid' => 1, 'title' => 'Team B', 'doktype' => 1, 'perms_everybody' => 31]);
+        $this->getConnectionPool()->getConnectionForTable('be_groups')
+            ->update('be_groups', ['db_mountpoints' => '2,3'], ['uid' => 50]);
+        $workspaces = $this->getConnectionPool()->getConnectionForTable('sys_workspace');
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '2'], ['uid' => self::TEAM_A]);
+        $workspaces->update('sys_workspace', ['db_mountpoints' => '3'], ['uid' => self::TEAM_B]);
+
+        $this->setUpBackendUser(self::COACH);
+        $this->sitIn(self::TEAM_B);
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['pages' => [3 => ['title' => 'Team B (draft)']]], []);
+        $dataHandler->process_datamap();
+        self::assertSame([], $dataHandler->errorLog);
+        $taskUid = $this->openTaskUid();
+
+        $this->getConnectionPool()->getConnectionForTable('be_users')
+            ->update('be_users', ['workspace_id' => self::TEAM_A], ['uid' => self::COACH]);
+        $this->setUpBackendUser(self::COACH);
+        self::assertSame(self::TEAM_A, (int)$GLOBALS['BE_USER']->workspace);
+        self::assertSame([2], array_map('intval', $GLOBALS['BE_USER']->getWebmounts()));
+
+        return $taskUid;
+    }
+
     private function sitIn(int $workspaceUid): void
     {
         $GLOBALS['BE_USER']->setWorkspace($workspaceUid);
@@ -461,6 +531,15 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
                 $queryBuilder->expr()->eq('t3ver_oid', 2),
                 $queryBuilder->expr()->eq('t3ver_wsid', $workspaceUid),
             )
+            ->executeQuery()->fetchOne();
+    }
+
+    private function commentCount(int $taskUid): int
+    {
+        $queryBuilder = $this->getConnectionPool()->getQueryBuilderForTable('tx_editorialflow_comment');
+
+        return (int)$queryBuilder->count('uid')->from('tx_editorialflow_comment')
+            ->where($queryBuilder->expr()->eq('task', $queryBuilder->createNamedParameter($taskUid, Connection::PARAM_INT)))
             ->executeQuery()->fetchOne();
     }
 
