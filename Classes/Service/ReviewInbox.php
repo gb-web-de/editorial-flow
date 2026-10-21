@@ -103,9 +103,28 @@ final readonly class ReviewInbox
             'readyToPublish' => $stageUid === StagesService::STAGE_PUBLISH_ID,
             'subjectTable' => (string)$task['subject_table'],
             'subjectUid' => (int)$task['subject_uid'],
-            'pageUid' => $pageUid,
+            'pageUid' => $this->boardPageUid($pageUid, (int)$user->workspace),
             'canPublish' => $canPublish,
         ];
+    }
+
+    /**
+     * The page "Open board" jumps to, as seen from the workspace the user sits in.
+     *
+     * A post written in a team workspace is a page that does not exist in Live
+     * (or another workspace) yet: opening the board on it from there ends in
+     * "Broken rootline". Its nearest ancestor that does exist shows the same
+     * card, since the board takes in the subtree and its workspace-born pages.
+     */
+    private function boardPageUid(int $pageUid, int $currentWorkspaceUid): int
+    {
+        $page = BackendUtility::getRecord('pages', $pageUid, 'pid,t3ver_wsid');
+        while ($page !== null && (int)$page['t3ver_wsid'] !== 0 && (int)$page['t3ver_wsid'] !== $currentWorkspaceUid) {
+            $pageUid = (int)$page['pid'];
+            $page = $pageUid > 0 ? BackendUtility::getRecord('pages', $pageUid, 'pid,t3ver_wsid') : null;
+        }
+
+        return $pageUid;
     }
 
     private function mayReadPage(BackendUserAuthentication $user, int $pageUid): bool

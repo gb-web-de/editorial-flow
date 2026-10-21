@@ -424,6 +424,29 @@ final class CrossWorkspaceActionsTest extends FunctionalTestCase
         self::assertTrue($entries[0]['canPublish']);
     }
 
+    /**
+     * "Open board" on a new post of a team workspace, clicked from Live: the
+     * page does not exist there yet, so the board opens on its live parent.
+     */
+    #[Test]
+    public function theApprovalsListOpensTheBoardOnALivePageForANewPost(): void
+    {
+        $this->sitIn(self::TEAM_B);
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['pages' => ['NEWpage' => ['pid' => 2, 'title' => 'C1 wins at home', 'sys_language_uid' => 0]]], []);
+        $dataHandler->process_datamap();
+        self::assertSame([], $dataHandler->errorLog);
+        $pageUid = (int)$dataHandler->substNEWwithIDs['NEWpage'];
+
+        $this->sitIn(0);
+        $entries = $this->reviewInbox()->forUser($GLOBALS['BE_USER'], [self::TEAM_B]);
+        self::assertCount(1, $entries);
+        self::assertSame(2, $entries[0]['pageUid']);
+
+        $this->sitIn(self::TEAM_B);
+        self::assertSame($pageUid, $this->reviewInbox()->forUser($GLOBALS['BE_USER'], [self::TEAM_B])[0]['pageUid']);
+    }
+
     #[Test]
     public function theApprovalsListIsEmptyOnceThePostIsLive(): void
     {
