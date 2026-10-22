@@ -153,6 +153,33 @@ final class TaskPreviewLinkTest extends FunctionalTestCase
         self::assertStringStartsWith('https://editorial.example/camino/', $payload['links'][0]['url']);
     }
 
+    /**
+     * "Preview" in the Approvals toolbar item and on the ticket, clicked from
+     * Live: core's plain link would show Live, where a page born in the team
+     * workspace does not exist ("Broken rootline").
+     */
+    #[Test]
+    public function thePreviewOfAMemberClickedFromLiveShowsTheTasksWorkspace(): void
+    {
+        $this->sitIn(self::TEAM_B);
+        $dataHandler = GeneralUtility::makeInstance(DataHandler::class);
+        $dataHandler->start(['pages' => ['NEWpage' => ['pid' => 2, 'title' => 'C1 wins at home', 'slug' => '/c1-wins', 'sys_language_uid' => 0]]], []);
+        $dataHandler->process_datamap();
+        self::assertSame([], $dataHandler->errorLog);
+        $pageUid = (int)$dataHandler->substNEWwithIDs['NEWpage'];
+        $this->sitIn(0);
+
+        $payload = $this->decode($this->buildTaskAjaxController()->previewMemberAction($this->post([
+            'table' => 'pages',
+            'uid' => $pageUid,
+        ])));
+
+        self::assertTrue($payload['success'], (string)($payload['message'] ?? ''));
+        $preview = $this->previewRowOf($payload['url']);
+        self::assertSame(self::TEAM_B, json_decode($preview['config'], true)['fullWorkspace']);
+        self::assertSame(0, (int)$GLOBALS['BE_USER']->workspace, 'never switched');
+    }
+
     #[Test]
     public function someoneOutsideTheTasksWorkspaceGetsNoLink(): void
     {

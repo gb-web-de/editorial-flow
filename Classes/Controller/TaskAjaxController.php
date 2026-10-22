@@ -628,13 +628,18 @@ final class TaskAjaxController
             : false;
         $versionUid = $versionRecord !== false ? (int)$versionRecord['uid'] : $uid;
 
-        // Built in the task's workspace: the preview link carries the
-        // workspace it previews, and asked from Live - where a coach who never
-        // switched sits - it would show them the page as it is, not the draft
-        // they are about to approve.
-        $build = function () use ($table, $uid, $versionUid): TaskActionError|string {
+        // Built in the task's workspace. Core's plain frontend link shows the
+        // workspace the user SITS in, though: from Live - where a coach who
+        // never switched sits - that is the page as it is, and a page born in
+        // the workspace is not there at all ("Broken rootline"). From outside
+        // the task's workspace it is an ADMCMD_prev link, which carries the
+        // workspace it previews.
+        $sitsInTaskWorkspace = (int)$this->getBackendUser()->workspace === $workspaceUid;
+        $build = function () use ($table, $uid, $versionUid, $sitsInTaskWorkspace): TaskActionError|string {
             return $this->assertMayEdit($table, $uid)
-                ?? GeneralUtility::makeInstance(PreviewUriBuilder::class)->buildUriForElement($table, $versionUid);
+                ?? ($sitsInTaskWorkspace
+                    ? GeneralUtility::makeInstance(PreviewUriBuilder::class)->buildUriForElement($table, $versionUid)
+                    : $this->previewLinkBuilder->build($this->getBackendUser(), $table, $uid)[0]['url'] ?? '');
         };
         $url = $workspaceUid > 0 ? $this->inTaskWorkspace($task, $build) : $build();
         if ($url instanceof ResponseInterface) {
