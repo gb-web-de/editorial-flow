@@ -58,7 +58,7 @@ export default defineConfig({
       // globally it is also handed to the setup project, which then fails
       // trying to read the very file it exists to write.
       name: 'chromium',
-      testIgnore: /write\//,
+      testIgnore: /(write|installation)\//,
       use: { ...devices['Desktop Chrome'], storageState: authFile },
       dependencies: ['setup'],
     },
@@ -77,6 +77,18 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], storageState: authFile },
       dependencies: ['setup'],
       teardown: 'cleanup',
+    },
+    {
+      /*
+       * The installation guide, checked as the editor it produces. No admin
+       * login and no `setup` dependency: what is under test is an account
+       * that `editorialflow:setup` created, so the admin's state would only
+       * hide what that editor cannot see. Its specs skip themselves unless
+       * EDITORIALFLOW_SETUP_EDITOR names such an editor.
+       */
+      name: 'installation',
+      testMatch: /installation\/.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
     },
     {
       name: 'cleanup',

@@ -4,6 +4,8 @@ on:
   push:
     branches: [master]
   pull_request:
+  # release.yml runs the whole suite before it builds anything.
+  workflow_call:
 
 permissions:
   contents: read
@@ -24,14 +26,19 @@ jobs:
       - run: composer phpstan
 
   tests:
+    name: tests (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ["8.2", "8.3", "8.4"]
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.3"
+          php-version: ${{ matrix.php }}
           extensions: pdo_sqlite, sqlite3
           coverage: none
       - run: composer install --no-progress --no-interaction
@@ -127,6 +134,142 @@ jobs:
         if: failure()
         with:
           name: playwright-artifacts
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+  # The installation guide (Documentation/Installation), run for real: one
+  # fresh TYPO3 per scenario, set up with nothing but the commands the guide
+  # shows, then checked from the outside - editorialflow:check must pass, a
+  # second run must change nothing, and the editor the scenario created must
+  # find the board, its stages and their workspace in a browser.
+  installation:
+    name: installation (${{ matrix.scenario }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - scenario: fresh
+            # Starts from an EMPTY page tree - see "Empty the database".
+            empty: true
+            args: --group=Redaktion --stages=Lektorat,Freigabe --owner=admin --editor=redakteur
+            editor: redakteur
+            workspace: Redaktion
+            stages: Lektorat,Freigabe
+          - scenario: single-group
+            args: --group=Online-Redaktion --owner=admin --editor=redakteur
+            editor: redakteur
+            workspace: Online-Redaktion
+            stages: Review,Approval
+          - scenario: group-per-workspace
+            args: --group=News,Sport --owner-group=Chefredaktion --editor=redakteur:Sport
+            editor: redakteur
+            workspace: Sport
+            stages: Review,Approval
+          - scenario: existing-groups
+            # An existing group tree to hang into: the demo's, whose group has
+            # the Page module, as --attach-to-editors expects.
+            seed-demo: true
+            args: --attach-to-editors --workspace=Redaktion --owner=admin
+            editor: editor
+            workspace: ""
+            stages: Review,Approval
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.3"
+          extensions: pdo_sqlite, sqlite3
+          coverage: none
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: composer install --no-progress --no-interaction
+      - run: npm ci
+
+      - name: Install TYPO3
+        env:
+          TYPO3_DB_DRIVER: sqlite
+          TYPO3_SETUP_ADMIN_USERNAME: admin
+          TYPO3_SETUP_ADMIN_PASSWORD: Password.1
+          TYPO3_SETUP_ADMIN_EMAIL: admin@example.com
+          TYPO3_PROJECT_NAME: Editorial Flow
+        run: |
+          .Build/bin/typo3 setup --no-interaction --force --server-type=other
+          .Build/bin/typo3 extension:setup
+          .Build/bin/typo3 configuration:set SYS/trustedHostsPattern ".*"
+
+      # `typo3 setup` imports the Camino demo site that theme-camino (a dev
+      # dependency) ships. The fresh scenario is about an installation with no
+      # pages at all, so they go again.
+      - name: Empty the database
+        if: matrix.empty
+        run: |
+          php -r '$db = new PDO("sqlite:" . glob("var/sqlite/*.sqlite")[0]);
+                  foreach (["pages", "tt_content", "sys_template", "sys_file_reference"] as $t) { $db->exec("DELETE FROM $t"); }'
+          rm -rf config/sites
+
+      - name: Seed an existing group tree
+        if: matrix.seed-demo
+        run: .Build/bin/typo3 editorialflow:democontent --no-interaction
+
+      - name: Run the scenario
+        env:
+          EDITORIALFLOW_EDITOR_PASSWORD: Password.1
+        run: .Build/bin/typo3 editorialflow:setup ${{ matrix.scenario }} ${{ matrix.args }} --no-interaction
+
+      - name: The check passes
+        run: .Build/bin/typo3 editorialflow:check
+
+      - name: Running it again changes nothing
+        env:
+          EDITORIALFLOW_EDITOR_PASSWORD: Password.1
+        run: |
+          .Build/bin/typo3 editorialflow:setup ${{ matrix.scenario }} ${{ matrix.args }} --no-interaction | tee "${RUNNER_TEMP}/second-run.txt"
+          grep -q "Everything is already in place" "${RUNNER_TEMP}/second-run.txt"
+
+      - name: Find the root page
+        id: root
+        run: |
+          echo "uid=$(php -r '$db = new PDO("sqlite:" . glob("var/sqlite/*.sqlite")[0]);
+                  echo $db->query("SELECT uid FROM pages WHERE pid = 0 AND deleted = 0 ORDER BY uid LIMIT 1")->fetchColumn();')" >> "$GITHUB_OUTPUT"
+
+      - name: Serve the installation
+        env:
+          PHP_CLI_SERVER_WORKERS: 4
+        run: |
+          nohup php -S 127.0.0.1:8080 -t .Build/Web Build/playwright/router.php \
+            > "${RUNNER_TEMP}/php-server.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8080/typo3/; then
+              exit 0
+            fi
+            sleep 2
+          done
+          cat "${RUNNER_TEMP}/php-server.log" >&2
+          exit 1
+
+      - run: npx playwright install --with-deps chromium
+
+      - name: The editor finds the board
+        env:
+          EDITORIALFLOW_BASE_URL: http://127.0.0.1:8080
+          EDITORIALFLOW_TEST_PAGE_ID: ${{ steps.root.outputs.uid }}
+          EDITORIALFLOW_SETUP_EDITOR: ${{ matrix.editor }}
+          EDITORIALFLOW_SETUP_PASSWORD: Password.1
+          EDITORIALFLOW_SETUP_WORKSPACE: ${{ matrix.workspace }}
+          EDITORIALFLOW_SETUP_STAGES: ${{ matrix.stages }}
+        run: npx playwright test --project=installation
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: installation-${{ matrix.scenario }}
           path: |
             test-results/
             playwright-report/
