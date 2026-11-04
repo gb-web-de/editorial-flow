@@ -18,6 +18,22 @@ goes live, the task closes with its history frozen into it.
 See [ARCHITECTURE.md](ARCHITECTURE.md) for the data model, the history-storage decision and the
 accessibility commitments.
 
+## Installing it in your TYPO3
+
+One command per situation – empty database, one editorial group, one workspace per group, or a
+large existing group tree that must stay as it is:
+
+```bash
+composer require gb-web/editorial-flow
+vendor/bin/typo3 extension:setup
+vendor/bin/typo3 editorialflow:setup          # asks which situation you are in
+vendor/bin/typo3 editorialflow:check          # says what is still missing
+```
+
+Full guide: [English](Documentation/Installation/README.md) · [Deutsch](Documentation/Installation/README.de.md)
+
+The rest of this file is about developing the extension itself.
+
 ## Requirements
 
 - [DDEV](https://ddev.com/) >= 1.24
