@@ -1,0 +1,11 @@
+"be_groups",,,,,,,,
+,"uid","pid","title","groupMods","subgroup","tables_modify","db_mountpoints","workspace_perms"
+,10,0,"Redaktion","web_layout,records","11","pages,tt_content","1",0
+,11,0,"Redaktion Basis","","","pages","",0
+,12,0,"Bildredaktion","media_management","","sys_file_reference","",0
+,13,0,"Online-Desk","web_layout","","pages,tt_content","1",1
+"pages",,,,,,,,
+,"uid","pid","title","doktype","deleted","perms_groupid","perms_group",
+,1,0,"Home",1,0,10,31,
+,2,1,"Redaktion only",1,0,10,31,
+,3,1,"Nobody's",1,0,0,0,
